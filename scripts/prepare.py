@@ -3,7 +3,15 @@
 import argparse
 
 from nextvisit.cities import CITIES
+from nextvisit.prepare.austin import prepare_austin
+from nextvisit.prepare.chicago import prepare_chicago
 from nextvisit.prepare.features import prepare_new_york
+
+_PREPARERS = {
+    "new_york": prepare_new_york,
+    "chicago": prepare_chicago,
+    "austin": prepare_austin,
+}
 
 
 def main() -> None:
@@ -15,11 +23,14 @@ def main() -> None:
 
 
 def prepare_cities(targets: list[str]) -> None:
-    pending = [city for city in targets if city != "new_york"]
-    if "new_york" in targets:
-        examples_path, cutoff_path = prepare_new_york()
-        print(f"new_york: wrote {examples_path}", flush=True)
-        print(f"new_york: wrote {cutoff_path}", flush=True)
+    pending = [city for city in targets if city not in _PREPARERS]
+    for city_id in targets:
+        prepare = _PREPARERS.get(city_id)
+        if prepare is None:
+            continue
+        examples_path, cutoff_path = prepare()
+        print(f"{city_id}: wrote {examples_path}", flush=True)
+        print(f"{city_id}: wrote {cutoff_path}", flush=True)
     if pending:
         raise NotImplementedError(
             "Prepare is not implemented yet for: " + ", ".join(pending)

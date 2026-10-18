@@ -17,6 +17,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from nextvisit.model.evaluate import baseline_probabilities, score_probabilities
+from nextvisit.prepare.austin import EXAMPLES_PATH as AUSTIN_EXAMPLES_PATH
+from nextvisit.prepare.chicago import EXAMPLES_PATH as CHICAGO_EXAMPLES_PATH
 from nextvisit.prepare.features import EXAMPLES_PATH
 
 CATEGORICAL = ("cuisine", "borough", "previous_grade")
@@ -30,10 +32,32 @@ NUMERIC = (
     "previous_violation_count",
     "days_since_last_positive",
 )
+CHICAGO_CATEGORICAL = ("facility_type", "risk", "zip")
+CHICAGO_NUMERIC = (
+    "days_since_previous",
+    "previous_positive",
+    "prior_inspection_count",
+    "prior_positive_count",
+    "prior_violation_count",
+    "previous_violation_count",
+    "days_since_last_positive",
+)
+AUSTIN_CATEGORICAL = ("zip",)
+AUSTIN_NUMERIC = (
+    "days_since_previous",
+    "previous_positive",
+    "previous_score",
+    "prior_inspection_count",
+    "prior_positive_count",
+    "days_since_last_positive",
+)
 
 
 class FeaturePreprocessor(BaseEstimator, TransformerMixin):
     """One-hot categories and median-fill numbers. Fit on the training period only."""
+
+    categorical = CATEGORICAL
+    numeric = NUMERIC
 
     def __init__(self) -> None:
         self.encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
@@ -41,23 +65,44 @@ class FeaturePreprocessor(BaseEstimator, TransformerMixin):
         self.scaler = StandardScaler()
 
     def fit(self, features: pl.DataFrame, y: np.ndarray | None = None) -> "FeaturePreprocessor":
-        categorical, numeric = _split(features)
+        categorical, numeric = _split(features, self.categorical, self.numeric)
         encoded = self.encoder.fit_transform(categorical)
         imputed = self.imputer.fit_transform(numeric)
         self.scaler.fit(np.hstack([encoded, imputed]))
         return self
 
     def transform(self, features: pl.DataFrame) -> np.ndarray:
-        categorical, numeric = _split(features)
+        categorical, numeric = _split(features, self.categorical, self.numeric)
         encoded = self.encoder.transform(categorical)
         imputed = self.imputer.transform(numeric)
         return self.scaler.transform(np.hstack([encoded, imputed]))
 
 
+class ChicagoPreprocessor(FeaturePreprocessor):
+    """Chicago has facility type, risk, and zip. It has no cuisine, score, or grade."""
+
+    categorical = CHICAGO_CATEGORICAL
+    numeric = CHICAGO_NUMERIC
+
+
+class AustinPreprocessor(FeaturePreprocessor):
+    """Austin has a zip and the previous routine score. It has no violation codes."""
+
+    categorical = AUSTIN_CATEGORICAL
+    numeric = AUSTIN_NUMERIC
+
+
 def train_city(city_id: str) -> None:
-    if city_id != "new_york":
-        raise NotImplementedError(f"Training for {city_id} is not implemented yet.")
-    train_new_york()
+    if city_id == "new_york":
+        train_new_york()
+        return
+    if city_id == "chicago":
+        train_chicago()
+        return
+    if city_id == "austin":
+        train_austin()
+        return
+    raise NotImplementedError(f"Training for {city_id} is not implemented yet.")
 
 
 def train_new_york(
@@ -65,13 +110,39 @@ def train_new_york(
     model_path: Path = Path("artifacts/new_york/model.joblib"),
     metrics_path: Path = Path("artifacts/new_york/metrics.json"),
 ) -> tuple[Path, Path]:
+    return _fit("new_york", examples_path, model_path, metrics_path, FeaturePreprocessor())
+
+
+def train_chicago(
+    examples_path: Path = CHICAGO_EXAMPLES_PATH,
+    model_path: Path = Path("artifacts/chicago/model.joblib"),
+    metrics_path: Path = Path("artifacts/chicago/metrics.json"),
+) -> tuple[Path, Path]:
+    return _fit("chicago", examples_path, model_path, metrics_path, ChicagoPreprocessor())
+
+
+def train_austin(
+    examples_path: Path = AUSTIN_EXAMPLES_PATH,
+    model_path: Path = Path("artifacts/austin/model.joblib"),
+    metrics_path: Path = Path("artifacts/austin/metrics.json"),
+) -> tuple[Path, Path]:
+    return _fit("austin", examples_path, model_path, metrics_path, AustinPreprocessor())
+
+
+def _fit(
+    city_id: str,
+    examples_path: Path,
+    model_path: Path,
+    metrics_path: Path,
+    preprocessor: FeaturePreprocessor,
+) -> tuple[Path, Path]:
     examples = pl.read_parquet(examples_path)
     train = examples.filter(pl.col("split") == "train")
     test = examples.filter(pl.col("split") == "test")
     y_train = train["label"].to_numpy()
     y_test = test["label"].to_numpy()
 
-    preprocessor = FeaturePreprocessor().fit(train)
+    preprocessor = preprocessor.fit(train)
     x_train = preprocessor.transform(train)
     x_test = preprocessor.transform(test)
 
@@ -93,7 +164,7 @@ def train_new_york(
         "lightgbm": score_probabilities(y_test, calibrated.predict_proba(x_test)[:, 1]),
     }
     metrics = {
-        "city": "new_york",
+        "city": city_id,
         "test_rows": int(test.height),
         "models": scores,
         "lightgbm_beats_baseline_pr_auc": (
@@ -106,16 +177,17 @@ def train_new_york(
     return model_path, metrics_path
 
 
-def _split(features: pl.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    categorical = (
-        features.select(CATEGORICAL)
+def _split(
+    features: pl.DataFrame,
+    categorical: tuple[str, ...],
+    numeric: tuple[str, ...],
+) -> tuple[np.ndarray, np.ndarray]:
+    categories = (
+        features.select(list(categorical))
         .with_columns(pl.all().fill_null("__missing__").cast(pl.String))
         .to_numpy()
     )
-    numeric = (
-        features.select(NUMERIC)
-        .with_columns(pl.col("previous_positive").cast(pl.Float64))
-        .to_numpy()
-        .astype(float)
-    )
-    return categorical, numeric
+    numbers = features.select(list(numeric))
+    if "previous_positive" in numeric:
+        numbers = numbers.with_columns(pl.col("previous_positive").cast(pl.Float64))
+    return categories, numbers.to_numpy().astype(float)

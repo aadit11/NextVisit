@@ -1,16 +1,27 @@
-"""Dispatch a city download. Only New York is implemented."""
+"""Dispatch a city download. New York and Chicago are implemented."""
 
 import os
 from pathlib import Path
 
+from nextvisit.cities.austin import download as download_austin
+from nextvisit.cities.chicago import download as download_chicago
 from nextvisit.cities.new_york import download as download_new_york
+
+_DOWNLOADERS = {
+    "new_york": download_new_york,
+    "chicago": download_chicago,
+    "austin": download_austin,
+}
 
 
 def download_cities(targets: list[str]) -> None:
-    pending = [city for city in targets if city != "new_york"]
-    if "new_york" in targets:
-        path = download_new_york()
-        print(f"new_york: wrote {path}", flush=True)
+    pending = [city for city in targets if city not in _DOWNLOADERS]
+    for city_id in targets:
+        download = _DOWNLOADERS.get(city_id)
+        if download is None:
+            continue
+        path = download()
+        print(f"{city_id}: wrote {path}", flush=True)
     if pending:
         raise NotImplementedError(
             "Download is not implemented yet for: " + ", ".join(pending)

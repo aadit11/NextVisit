@@ -48,7 +48,7 @@ def test_an_unknown_camis_is_not_found() -> None:
 
 
 def test_untrained_city_is_not_implemented() -> None:
-    response = client.get("/cities/chicago/restaurants/1")
+    response = client.get("/cities/king_county/restaurants/1")
     assert response.status_code == 501
 
 

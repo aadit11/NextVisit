@@ -38,5 +38,5 @@ def test_phone_is_dropped_and_fields_are_renamed() -> None:
 
 
 def test_other_cities_still_raise() -> None:
-    with pytest.raises(NotImplementedError, match="chicago"):
-        download_cities(["chicago"])
+    with pytest.raises(NotImplementedError, match="king_county"):
+        download_cities(["king_county"])
