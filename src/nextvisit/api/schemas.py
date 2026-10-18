@@ -18,3 +18,4 @@ class RestaurantOut(BaseModel):
     label: str
     codes: list[str]
     work_order: list[WorkOrderItemOut]
+    work_order_reason: str | None = None

@@ -46,7 +46,7 @@ def faithfulness_errors(
         if description is None:
             errors.append(f"No official description for {item.violation_code}.")
             continue
-        if item.source_span not in description:
+        if not item.source_span.strip() or item.source_span not in description:
             errors.append(f"source_span for {item.violation_code} is not in the official description.")
         if item.source_span not in item.step:
             errors.append(f"Step for {item.violation_code} drops the official span.")
