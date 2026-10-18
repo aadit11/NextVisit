@@ -1,0 +1,29 @@
+[project]
+name = "nextvisit"
+version = "0.1.0"
+description = "Rank a restaurant's next inspection from public city health data."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "lightgbm",
+    "polars",
+    "pyarrow",
+    "pydantic",
+    "scikit-learn",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
