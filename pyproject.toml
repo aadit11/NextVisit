@@ -14,7 +14,7 @@ dependencies = [
     "uvicorn",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest"]
 
 [build-system]
