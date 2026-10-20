@@ -8,14 +8,40 @@ import polars as pl
 
 from nextvisit.cities.austin import RAW_PATH as AUSTIN_RAW_PATH
 from nextvisit.cities.austin import SPEC as AUSTIN_SPEC
+from nextvisit.cities.boston import RAW_PATH as BOSTON_RAW_PATH
+from nextvisit.cities.boston import SPEC as BOSTON_SPEC
 from nextvisit.cities.chicago import RAW_PATH as CHICAGO_RAW_PATH
 from nextvisit.cities.chicago import SPEC as CHICAGO_SPEC
+from nextvisit.cities.king_county import RAW_PATH as KING_COUNTY_RAW_PATH
+from nextvisit.cities.king_county import SPEC as KING_COUNTY_SPEC
+from nextvisit.cities.los_angeles import INSPECTIONS_PATH as LOS_ANGELES_RAW_PATH
+from nextvisit.cities.los_angeles import SPEC as LOS_ANGELES_SPEC
 from nextvisit.cities.new_york import RAW_PATH, SPEC
-from nextvisit.model.train import AUSTIN_CATEGORICAL, AUSTIN_NUMERIC, CHICAGO_CATEGORICAL, CHICAGO_NUMERIC, FeaturePreprocessor
+from nextvisit.cities.san_francisco import RAW_PATH as SAN_FRANCISCO_RAW_PATH
+from nextvisit.cities.san_francisco import SPEC as SAN_FRANCISCO_SPEC
+from nextvisit.model.train import (
+    AUSTIN_CATEGORICAL,
+    AUSTIN_NUMERIC,
+    BOSTON_CATEGORICAL,
+    BOSTON_NUMERIC,
+    CHICAGO_CATEGORICAL,
+    CHICAGO_NUMERIC,
+    KING_COUNTY_CATEGORICAL,
+    KING_COUNTY_NUMERIC,
+    LOS_ANGELES_CATEGORICAL,
+    LOS_ANGELES_NUMERIC,
+    SAN_FRANCISCO_CATEGORICAL,
+    SAN_FRANCISCO_NUMERIC,
+    FeaturePreprocessor,
+)
 from nextvisit.prepare.austin import INSPECTIONS_PATH as AUSTIN_INSPECTIONS_PATH
+from nextvisit.prepare.boston import INSPECTIONS_PATH as BOSTON_INSPECTIONS_PATH
 from nextvisit.prepare.chicago import INSPECTIONS_PATH as CHICAGO_INSPECTIONS_PATH
 from nextvisit.prepare.collapse import INSPECTIONS_PATH
 from nextvisit.prepare.features import assert_features_before_target
+from nextvisit.prepare.king_county import INSPECTIONS_PATH as KING_COUNTY_INSPECTIONS_PATH
+from nextvisit.prepare.los_angeles import PROCESSED_INSPECTIONS_PATH as LOS_ANGELES_INSPECTIONS_PATH
+from nextvisit.prepare.san_francisco import INSPECTIONS_PATH as SAN_FRANCISCO_INSPECTIONS_PATH
 
 MODEL_PATH = "artifacts/new_york/model.joblib"
 CHICAGO_MODEL_PATH = "artifacts/chicago/model.joblib"
@@ -36,6 +62,7 @@ def predict_new_york(camis: str) -> dict[str, object]:
             "city": SPEC.id,
             "restaurant_id": camis,
             "name": name,
+            "address": _latest_address(RAW_PATH, "camis", camis),
             "cuisine": None,
             "abstained": True,
             "probability": None,
@@ -58,6 +85,7 @@ def predict_new_york(camis: str) -> dict[str, object]:
         "city": SPEC.id,
         "restaurant_id": camis,
         "name": latest["name"],
+        "address": _latest_address(RAW_PATH, "camis", camis),
         "cuisine": latest["cuisine"],
         "abstained": False,
         "probability": probability,
@@ -78,6 +106,7 @@ def predict_chicago(license_id: str) -> dict[str, object]:
             "city": CHICAGO_SPEC.id,
             "restaurant_id": license_id,
             "name": _chicago_name(license_id),
+            "address": _latest_address(CHICAGO_RAW_PATH, "license", license_id),
             "cuisine": None,
             "abstained": True,
             "probability": None,
@@ -100,6 +129,7 @@ def predict_chicago(license_id: str) -> dict[str, object]:
         "city": CHICAGO_SPEC.id,
         "restaurant_id": license_id,
         "name": latest["name"],
+        "address": _latest_address(CHICAGO_RAW_PATH, "license", license_id),
         "cuisine": None,
         "abstained": False,
         "probability": probability,
@@ -252,6 +282,7 @@ def predict_austin(facility_id: str) -> dict[str, object]:
             "city": AUSTIN_SPEC.id,
             "restaurant_id": facility_id,
             "name": _austin_name(facility_id),
+            "address": _latest_address(AUSTIN_RAW_PATH, "facility_id", facility_id),
             "cuisine": None,
             "abstained": True,
             "probability": None,
@@ -274,6 +305,7 @@ def predict_austin(facility_id: str) -> dict[str, object]:
         "city": AUSTIN_SPEC.id,
         "restaurant_id": facility_id,
         "name": latest["name"],
+        "address": _latest_address(AUSTIN_RAW_PATH, "facility_id", facility_id),
         "cuisine": None,
         "abstained": False,
         "probability": probability,
@@ -329,6 +361,249 @@ def _austin_name(facility_id: str) -> str | None:
     rows = (
         pl.read_parquet(AUSTIN_RAW_PATH, columns=["facility_id", "name"])
         .filter(pl.col("facility_id") == facility_id)
+        .drop_nulls("name")
+    )
+    if rows.height == 0:
+        return None
+    return rows["name"][0]
+
+
+def predict_king_county(business_id: str) -> dict[str, object]:
+    return _lookup(
+        spec=KING_COUNTY_SPEC,
+        restaurant_id=business_id,
+        visits=_king_county_inspections()
+        .filter(pl.col("business_id") == business_id)
+        .sort(["inspection_date", "inspection_id"]),
+        known=_known_ids(KING_COUNTY_RAW_PATH, "business_id"),
+        absent_name=_raw_column_name(KING_COUNTY_RAW_PATH, "business_id", business_id),
+        address=_latest_address(KING_COUNTY_RAW_PATH, "business_id", business_id),
+        feature_row=lambda records, as_of: _city_feature_row(
+            records,
+            as_of,
+            KING_COUNTY_CATEGORICAL,
+            KING_COUNTY_NUMERIC,
+            extra=_king_county_extra,
+        ),
+        bundle=_saved_model("artifacts/king_county/model.joblib"),
+    )
+
+
+def predict_los_angeles(facility_id: str) -> dict[str, object]:
+    return _lookup(
+        spec=LOS_ANGELES_SPEC,
+        restaurant_id=facility_id,
+        visits=_los_angeles_inspections()
+        .filter(pl.col("facility_id") == facility_id)
+        .sort(["inspection_date", "inspection_id"]),
+        known=_known_ids(LOS_ANGELES_RAW_PATH, "facility_id"),
+        absent_name=_raw_column_name(LOS_ANGELES_RAW_PATH, "facility_id", facility_id),
+        address=_latest_address(LOS_ANGELES_RAW_PATH, "facility_id", facility_id),
+        feature_row=lambda records, as_of: _city_feature_row(
+            records,
+            as_of,
+            LOS_ANGELES_CATEGORICAL,
+            LOS_ANGELES_NUMERIC,
+            extra=_los_angeles_extra,
+        ),
+        bundle=_saved_model("artifacts/los_angeles/model.joblib"),
+    )
+
+
+def predict_boston(license_id: str) -> dict[str, object]:
+    return _lookup(
+        spec=BOSTON_SPEC,
+        restaurant_id=license_id,
+        visits=_boston_inspections()
+        .filter(pl.col("license") == license_id)
+        .sort(["inspection_date", "inspection_id"]),
+        known=_known_ids(BOSTON_RAW_PATH, "license"),
+        absent_name=_raw_column_name(BOSTON_RAW_PATH, "license", license_id),
+        address=_latest_address(BOSTON_RAW_PATH, "license", license_id),
+        feature_row=lambda records, as_of: _city_feature_row(
+            records,
+            as_of,
+            BOSTON_CATEGORICAL,
+            BOSTON_NUMERIC,
+            extra=_boston_extra,
+        ),
+        bundle=_saved_model("artifacts/boston/model.joblib"),
+    )
+
+
+def predict_san_francisco(permit_number: str) -> dict[str, object]:
+    return _lookup(
+        spec=SAN_FRANCISCO_SPEC,
+        restaurant_id=permit_number,
+        visits=_san_francisco_inspections()
+        .filter(pl.col("permit_number") == permit_number)
+        .sort(["inspection_date", "inspection_id"]),
+        known=_known_ids(SAN_FRANCISCO_RAW_PATH, "permit_number"),
+        absent_name=_raw_column_name(SAN_FRANCISCO_RAW_PATH, "permit_number", permit_number),
+        address=_latest_address(SAN_FRANCISCO_RAW_PATH, "permit_number", permit_number),
+        feature_row=lambda records, as_of: _city_feature_row(
+            records,
+            as_of,
+            SAN_FRANCISCO_CATEGORICAL,
+            SAN_FRANCISCO_NUMERIC,
+            extra=_san_francisco_extra,
+        ),
+        bundle=_saved_model("artifacts/san_francisco/model.joblib"),
+    )
+
+
+def _latest_address(path, column: str, restaurant_id: str) -> str | None:
+    """Latest non-empty street line for this restaurant. Missing column means no address yet."""
+    if "address" not in pl.scan_parquet(path).collect_schema().names():
+        return None
+    rows = (
+        pl.read_parquet(path, columns=[column, "address", "inspection_date"])
+        .filter(pl.col(column) == restaurant_id)
+        .drop_nulls("address")
+        .sort("inspection_date")
+    )
+    if rows.height == 0:
+        return None
+    return str(rows["address"][-1])
+
+
+def _lookup(
+    *,
+    spec,
+    restaurant_id: str,
+    visits: pl.DataFrame,
+    known: frozenset[str],
+    absent_name: str | None,
+    address: str | None,
+    feature_row,
+    bundle: dict[str, object],
+) -> dict[str, object]:
+    if visits.height == 0:
+        if restaurant_id not in known:
+            raise UnknownRestaurant(restaurant_id)
+        return {
+            "city": spec.id,
+            "restaurant_id": restaurant_id,
+            "name": absent_name,
+            "address": address,
+            "cuisine": None,
+            "abstained": True,
+            "probability": None,
+            "label": spec.label,
+            "codes": [],
+            "work_order": [],
+        }
+    records = visits.to_dicts()
+    latest = records[-1]
+    as_of = _as_of(latest["inspection_date"])
+    assert_features_before_target(
+        [visit["inspection_date"] for visit in records],
+        as_of,
+    )
+    features = pl.DataFrame([feature_row(records, as_of)])
+    probability = float(bundle["model"].predict_proba(bundle["preprocessor"].transform(features))[0, 1])
+    return {
+        "city": spec.id,
+        "restaurant_id": restaurant_id,
+        "name": latest["name"],
+        "address": address,
+        "cuisine": None,
+        "abstained": False,
+        "probability": probability,
+        "label": spec.label,
+        "codes": _history_codes(records),
+        "work_order": [],
+    }
+
+
+def _city_feature_row(visits, as_of, categorical, numeric, extra) -> dict[str, object]:
+    previous = visits[-1]
+    last_positive = next(
+        (visit["inspection_date"] for visit in reversed(visits) if visit["positive"]),
+        None,
+    )
+    row = {
+        "days_since_previous": (as_of - previous["inspection_date"]).days,
+        "previous_positive": bool(previous["positive"]),
+        "prior_inspection_count": len(visits),
+        "prior_positive_count": sum(bool(visit["positive"]) for visit in visits),
+        "prior_violation_count": sum(int(visit["violation_count"]) for visit in visits),
+        "previous_violation_count": int(previous["violation_count"]),
+        "days_since_last_positive": (
+            None if last_positive is None else (as_of - last_positive).days
+        ),
+    }
+    row.update(extra(previous))
+    missing = [name for name in (*categorical, *numeric) if name not in row]
+    if missing:
+        raise KeyError(f"Feature row is missing {missing}.")
+    return row
+
+
+def _king_county_extra(previous: dict[str, object]) -> dict[str, object]:
+    return {
+        "risk": previous["risk"],
+        "zip": previous["zip"],
+        "previous_grade": previous["grade"],
+        "previous_score": previous["score"],
+    }
+
+
+def _los_angeles_extra(previous: dict[str, object]) -> dict[str, object]:
+    return {
+        "pe_description": previous["pe_description"],
+        "zip": previous["zip"],
+        "previous_grade": previous["grade"],
+        "previous_score": previous["score"],
+    }
+
+
+def _boston_extra(previous: dict[str, object]) -> dict[str, object]:
+    return {"license_description": previous["license_description"], "zip": previous["zip"]}
+
+
+def _san_francisco_extra(previous: dict[str, object]) -> dict[str, object]:
+    return {"permit_type": previous["permit_type"], "neighborhood": previous["neighborhood"]}
+
+
+@lru_cache(maxsize=1)
+def _king_county_inspections() -> pl.DataFrame:
+    return pl.read_parquet(KING_COUNTY_INSPECTIONS_PATH)
+
+
+@lru_cache(maxsize=1)
+def _los_angeles_inspections() -> pl.DataFrame:
+    return pl.read_parquet(LOS_ANGELES_INSPECTIONS_PATH)
+
+
+@lru_cache(maxsize=1)
+def _boston_inspections() -> pl.DataFrame:
+    return pl.read_parquet(BOSTON_INSPECTIONS_PATH)
+
+
+@lru_cache(maxsize=1)
+def _san_francisco_inspections() -> pl.DataFrame:
+    return pl.read_parquet(SAN_FRANCISCO_INSPECTIONS_PATH)
+
+
+@lru_cache(maxsize=8)
+def _known_ids(path: str, column: str) -> frozenset[str]:
+    values = pl.read_parquet(path, columns=[column])[column].drop_nulls()
+    return frozenset(values.to_list())
+
+
+@lru_cache(maxsize=4)
+def _saved_model(path: str) -> dict[str, object]:
+    bundle = joblib.load(path)
+    if not isinstance(bundle["preprocessor"], FeaturePreprocessor):
+        raise TypeError("Saved preprocessor does not match this version.")
+    return bundle
+
+
+def _raw_column_name(path: str, column: str, restaurant_id: str) -> str | None:
+    rows = (
+        pl.read_parquet(path, columns=[column, "name"])
+        .filter(pl.col(column) == restaurant_id)
         .drop_nulls("name")
     )
     if rows.height == 0:

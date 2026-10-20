@@ -14,7 +14,7 @@ from nextvisit.workorder.generate import build_work_order
 client = TestClient(app)
 
 
-def test_phone_and_address_are_not_kept() -> None:
+def test_phone_is_dropped_and_the_street_address_is_kept() -> None:
     frame = normalize_rows(
         [
             {
@@ -33,7 +33,7 @@ def test_phone_and_address_are_not_kept() -> None:
         ]
     )
     assert "phone" not in frame.columns
-    assert "address" not in frame.columns
+    assert frame["address"][0] == "1201 Barbara Jordan Blvd"
     assert frame["zip"][0] == "78723"
     assert frame["score"][0] == 89.0
     assert str(frame["inspection_date"][0]) == "2026-09-24"

@@ -30,6 +30,7 @@ src/nextvisit/api/main.py               GET /cities and GET /cities/{city_id}/re
 scripts/download.py
 scripts/prepare.py
 scripts/train.py
+scripts/record_results.py               # writes the README table from metrics.json
 tests/test_collapse.py
 tests/test_leakage.py
 tests/test_split.py
@@ -50,6 +51,7 @@ uv run pytest
 uv run python scripts/download.py --city new_york
 uv run python scripts/prepare.py --city new_york
 uv run python scripts/train.py --city new_york
+uv run python scripts/record_results.py
 uv run uvicorn nextvisit.api.main:app --reload
 ```
 

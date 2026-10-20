@@ -4,12 +4,20 @@ import argparse
 
 from nextvisit.cities import CITIES
 from nextvisit.prepare.austin import prepare_austin
+from nextvisit.prepare.boston import prepare_boston
 from nextvisit.prepare.chicago import prepare_chicago
 from nextvisit.prepare.features import prepare_new_york
+from nextvisit.prepare.king_county import prepare_king_county
+from nextvisit.prepare.los_angeles import prepare_los_angeles
+from nextvisit.prepare.san_francisco import prepare_san_francisco
 
 _PREPARERS = {
     "new_york": prepare_new_york,
     "chicago": prepare_chicago,
+    "king_county": prepare_king_county,
+    "los_angeles": prepare_los_angeles,
+    "boston": prepare_boston,
+    "san_francisco": prepare_san_francisco,
     "austin": prepare_austin,
 }
 

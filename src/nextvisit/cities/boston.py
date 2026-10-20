@@ -1,10 +1,138 @@
+"""Boston food-establishment inspections. One source row is one violation."""
+
+from datetime import date
+from pathlib import Path
+
+import httpx
+import polars as pl
+
+from nextvisit.addresses import format_address
 from nextvisit.cities.base import CitySpec
 
 SPEC = CitySpec(
     id="boston",
     name="Boston",
     label="Next inspection result is a fail",
-    source_url="https://data.boston.gov/dataset/food-establishment-inspections",
+    source_url="https://data.boston.gov/api/3/action/datastore_search",
     has_work_order=True,
     cuisine_in_source=False,
 )
+
+RESOURCE_ID = "4582bec6-2b4f-4f9e-bc55-cbaa73117f4c"
+PAGE_SIZE = 10_000
+RAW_PATH = Path("data/raw/boston/inspections.parquet")
+# Exact result strings from the file. HE_Filed and HE_Closure are not fails.
+FAIL_RESULTS = frozenset({"Fail", "Failed", "HE_Fail", "HE_FailExt", "HE_FAILNOR"})
+PASS_RESULTS = frozenset({"Pass", "PassViol", "HE_Pass", "NoViol"})
+
+_FIELDS = (
+    "businessname",
+    "dbaname",
+    "licenseno",
+    "descript",
+    "result",
+    "resultdttm",
+    "violation",
+    "violdesc",
+    "address",
+    "city",
+    "state",
+    "zip",
+)
+
+SCHEMA = {
+    "license": pl.String,
+    "inspection_id": pl.String,
+    "name": pl.String,
+    "address": pl.String,
+    "license_description": pl.String,
+    "zip": pl.String,
+    "inspection_date": pl.Date,
+    "result": pl.String,
+    "violation_code": pl.String,
+    "violation_description": pl.String,
+}
+
+
+def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
+    """Rename source fields. Owner names and inspector comments are not selected."""
+    cleaned: list[dict[str, object]] = []
+    for row in rows:
+        inspected = _parse_date(row.get("resultdttm"))
+        cleaned.append(
+            {
+                "license": _text(row.get("licenseno")),
+                "inspection_id": _text(row.get("resultdttm")),
+                "name": _text(row.get("businessname")) or _text(row.get("dbaname")),
+                "address": format_address(row.get("address"), row.get("city"), row.get("state"), row.get("zip")),
+                "license_description": _text(row.get("descript")),
+                "zip": _zip(row.get("zip")),
+                "inspection_date": inspected,
+                "result": _text(row.get("result")),
+                "violation_code": _text(row.get("violation")),
+                "violation_description": _text(row.get("violdesc")),
+            }
+        )
+    return pl.DataFrame(cleaned, schema=SCHEMA)
+
+
+def download(path: Path = RAW_PATH) -> Path:
+    """Page the Boston datastore and overwrite the raw parquet."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames: list[pl.DataFrame] = []
+    offset = 0
+    with httpx.Client(timeout=180) as client:
+        while True:
+            rows = _page(client, offset)
+            if not rows:
+                break
+            frames.append(normalize_rows(rows))
+            offset += len(rows)
+            print(f"boston: downloaded {offset} rows", flush=True)
+            if len(rows) < PAGE_SIZE:
+                break
+    if not frames:
+        raise RuntimeError("Boston download returned no rows.")
+    pl.concat(frames).write_parquet(path)
+    return path
+
+
+def _page(client: httpx.Client, offset: int) -> list[dict[str, object]]:
+    response = client.post(
+        SPEC.source_url,
+        json={
+            "resource_id": RESOURCE_ID,
+            "limit": PAGE_SIZE,
+            "offset": offset,
+            "fields": list(_FIELDS),
+            "sort": "_id",
+        },
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("success"):
+        raise RuntimeError("Boston download returned an unexpected payload.")
+    records = payload.get("result", {}).get("records")
+    if not isinstance(records, list):
+        raise RuntimeError("Boston download returned an unexpected payload.")
+    return records
+
+
+def _text(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value).strip() or None
+
+
+def _zip(value: object) -> str | None:
+    text = _text(value)
+    if text is None:
+        return None
+    digits = "".join(character for character in text if character.isdigit())
+    return digits[:5] or None
+
+
+def _parse_date(value: object) -> date | None:
+    if not isinstance(value, str) or len(value) < 10:
+        return None
+    return date.fromisoformat(value[:10])

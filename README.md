@@ -16,6 +16,110 @@ Seven jurisdictions are wired in:
 
 A language model is not part of the ranker. After the codes are chosen, one JSON call writes a closing work order for cities that publish violation text. Python rejects a step that cites another code or drops a span of the official description. Austin returns an empty work order.
 
+## Results
+
+Held-out scores below are written by `scripts/record_results.py`. Each number comes from `artifacts/{city}/metrics.json`, and the cutoff comes from `artifacts/{city}/cutoff.json`. A city stays out of the table until those files exist. Repeat last visit is the baseline row in every city.
+
+<!-- results:start -->
+### New York
+
+Next cycle inspection includes a critical violation
+
+Cutoff 2026-05-07. Test window 2026-05-08 through 2026-10-15. 8615 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.902 | 0.183 | 0.100 |
+| Logistic regression | 0.934 | 0.092 | 0.107 |
+| LightGBM | 0.949 | 0.085 | 0.109 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+
+### Chicago
+
+Next inspection result is Fail
+
+Cutoff 2023-09-19. Test window 2023-09-20 through 2026-10-16. 28100 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.186 | 0.368 | 0.062 |
+| Logistic regression | 0.288 | 0.154 | 0.173 |
+| LightGBM | 0.306 | 0.150 | 0.184 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+
+### King County
+
+Next inspection includes a violation the county marks as serious
+
+Cutoff 2025-12-01. Test window 2025-12-02 through 2026-10-17. 11485 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.412 | 0.277 | 0.193 |
+| Logistic regression | 0.689 | 0.142 | 0.280 |
+| LightGBM | 0.702 | 0.137 | 0.281 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+
+### Los Angeles County
+
+Next inspection includes a serious violation in the county points system
+
+Cutoff 2026-04-07. Test window 2026-04-08 through 2026-09-30. 10449 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.384 | 0.349 | 0.139 |
+| Logistic regression | 0.506 | 0.210 | 0.177 |
+| LightGBM | 0.520 | 0.211 | 0.179 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+
+### Boston
+
+Next inspection result is a fail
+
+Cutoff 2023-11-09. Test window 2023-11-10 through 2026-10-16. 31112 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.407 | 0.657 | 0.061 |
+| Logistic regression | 0.737 | 0.196 | 0.188 |
+| LightGBM | 0.773 | 0.190 | 0.198 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+
+### San Francisco
+
+Next inspection status is Conditional Pass or Closure
+
+Cutoff 2026-01-09. Test window 2026-01-12 through 2026-10-15. 2513 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.037 | 0.059 | 0.111 |
+| Logistic regression | 0.063 | 0.045 | 0.200 |
+| LightGBM | 0.070 | 0.035 | 0.233 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+
+### Austin
+
+Next routine inspection scores below 90
+
+Cutoff 2026-04-01. Test window 2026-04-02 through 2026-09-24. 2725 test visits.
+
+| Model | PR-AUC | Brier | Top-decile capture |
+|---|---:|---:|---:|
+| Repeat last visit | 0.576 | 0.209 | 0.204 |
+| Logistic regression | 0.754 | 0.141 | 0.262 |
+| LightGBM | 0.764 | 0.139 | 0.268 |
+
+On PR-AUC, LightGBM is ahead of repeat last visit.
+<!-- results:end -->
+
 ## Folder structure
 
 ```
@@ -52,6 +156,7 @@ tests/
 scripts/download.py
 scripts/prepare.py
 scripts/train.py
+scripts/record_results.py              # README table from metrics.json
 
 artifacts/{city}/                        # gitignored model.joblib, metrics.json, cutoff.json
 
@@ -60,13 +165,14 @@ web/                                     # city, then name or id
 
 ## Status
 
-This commit is the folder structure and the rules that do not depend on a download: the city registry, the time split, the leakage check, the repeat-last-visit baseline, and the work-order faithfulness check. Download, example building, and model fitting are the next phases. `GET /cities/{city}/restaurants/{id}` returns 501 until a model artifact exists.
+A city is scored after its own download, prepare, and train steps. Until then, download and train raise `NotImplementedError`, and a lookup returns 501. The results table lists only cities whose metrics files are on disk.
 
 ## Commands
 
 ```bash
 uv sync
 uv run pytest
+uv run python scripts/record_results.py
 uv run uvicorn nextvisit.api.main:app --reload
 ```
 

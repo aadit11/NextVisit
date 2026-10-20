@@ -23,6 +23,8 @@ def test_a_restaurant_with_history_returns_a_probability() -> None:
     assert body["name"]
     assert 0.0 <= body["probability"] <= 1.0
     assert body["codes"]
+    assert all(item["code"] for item in body["codes"])
+    assert any(item["description"] for item in body["codes"])
     assert body["label"].startswith("Next cycle inspection")
 
 
@@ -47,9 +49,9 @@ def test_an_unknown_camis_is_not_found() -> None:
     assert response.status_code == 404
 
 
-def test_untrained_city_is_not_implemented() -> None:
-    response = client.get("/cities/king_county/restaurants/1")
-    assert response.status_code == 501
+def test_unknown_city_is_not_found() -> None:
+    response = client.get("/cities/not_a_city/restaurants/1")
+    assert response.status_code == 404
 
 
 def test_unset_work_order_settings_keep_the_score(monkeypatch: pytest.MonkeyPatch) -> None:

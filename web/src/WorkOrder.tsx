@@ -35,8 +35,11 @@ export function WorkOrder({ items, hasWorkOrder, reason, activeCode }: WorkOrder
         <ol>
           {items.map((item) => (
             <li
+              id={`step-${item.violation_code}`}
               key={item.violation_code}
-              className={activeCode && activeCode !== item.violation_code ? "dimmed" : undefined}
+              className={
+                activeCode === item.violation_code ? "lit" : activeCode ? "dimmed" : undefined
+              }
             >
               <div className="step-meta">
                 <span>{STATIONS[item.station] ?? item.station}</span>

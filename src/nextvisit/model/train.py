@@ -18,8 +18,12 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from nextvisit.model.evaluate import baseline_probabilities, score_probabilities
 from nextvisit.prepare.austin import EXAMPLES_PATH as AUSTIN_EXAMPLES_PATH
+from nextvisit.prepare.boston import EXAMPLES_PATH as BOSTON_EXAMPLES_PATH
 from nextvisit.prepare.chicago import EXAMPLES_PATH as CHICAGO_EXAMPLES_PATH
 from nextvisit.prepare.features import EXAMPLES_PATH
+from nextvisit.prepare.king_county import EXAMPLES_PATH as KING_COUNTY_EXAMPLES_PATH
+from nextvisit.prepare.los_angeles import EXAMPLES_PATH as LOS_ANGELES_EXAMPLES_PATH
+from nextvisit.prepare.san_francisco import EXAMPLES_PATH as SAN_FRANCISCO_EXAMPLES_PATH
 
 CATEGORICAL = ("cuisine", "borough", "previous_grade")
 NUMERIC = (
@@ -51,6 +55,31 @@ AUSTIN_NUMERIC = (
     "prior_positive_count",
     "days_since_last_positive",
 )
+KING_COUNTY_CATEGORICAL = ("risk", "zip", "previous_grade")
+KING_COUNTY_NUMERIC = (
+    "days_since_previous",
+    "previous_positive",
+    "previous_score",
+    "prior_inspection_count",
+    "prior_positive_count",
+    "prior_violation_count",
+    "previous_violation_count",
+    "days_since_last_positive",
+)
+LOS_ANGELES_CATEGORICAL = ("pe_description", "zip", "previous_grade")
+LOS_ANGELES_NUMERIC = KING_COUNTY_NUMERIC
+BOSTON_CATEGORICAL = ("license_description", "zip")
+BOSTON_NUMERIC = (
+    "days_since_previous",
+    "previous_positive",
+    "prior_inspection_count",
+    "prior_positive_count",
+    "prior_violation_count",
+    "previous_violation_count",
+    "days_since_last_positive",
+)
+SAN_FRANCISCO_CATEGORICAL = ("permit_type", "neighborhood")
+SAN_FRANCISCO_NUMERIC = BOSTON_NUMERIC
 
 
 class FeaturePreprocessor(BaseEstimator, TransformerMixin):
@@ -92,17 +121,39 @@ class AustinPreprocessor(FeaturePreprocessor):
     numeric = AUSTIN_NUMERIC
 
 
+class KingCountyPreprocessor(FeaturePreprocessor):
+    """King County has risk, zip, grade, and the previous inspection score."""
+
+    categorical = KING_COUNTY_CATEGORICAL
+    numeric = KING_COUNTY_NUMERIC
+
+
+class LosAngelesPreprocessor(FeaturePreprocessor):
+    """Los Angeles has the program description, zip, grade, and previous score."""
+
+    categorical = LOS_ANGELES_CATEGORICAL
+    numeric = LOS_ANGELES_NUMERIC
+
+
+class BostonPreprocessor(FeaturePreprocessor):
+    """Boston has the license description and zip. It has no numeric score."""
+
+    categorical = BOSTON_CATEGORICAL
+    numeric = BOSTON_NUMERIC
+
+
+class SanFranciscoPreprocessor(FeaturePreprocessor):
+    """San Francisco has the permit type and the neighborhood. It has no numeric score."""
+
+    categorical = SAN_FRANCISCO_CATEGORICAL
+    numeric = SAN_FRANCISCO_NUMERIC
+
+
 def train_city(city_id: str) -> None:
-    if city_id == "new_york":
-        train_new_york()
-        return
-    if city_id == "chicago":
-        train_chicago()
-        return
-    if city_id == "austin":
-        train_austin()
-        return
-    raise NotImplementedError(f"Training for {city_id} is not implemented yet.")
+    trainer = _TRAINERS.get(city_id)
+    if trainer is None:
+        raise NotImplementedError(f"Training for {city_id} is not implemented yet.")
+    trainer()
 
 
 def train_new_york(
@@ -127,6 +178,49 @@ def train_austin(
     metrics_path: Path = Path("artifacts/austin/metrics.json"),
 ) -> tuple[Path, Path]:
     return _fit("austin", examples_path, model_path, metrics_path, AustinPreprocessor())
+
+
+def train_king_county(
+    examples_path: Path = KING_COUNTY_EXAMPLES_PATH,
+    model_path: Path = Path("artifacts/king_county/model.joblib"),
+    metrics_path: Path = Path("artifacts/king_county/metrics.json"),
+) -> tuple[Path, Path]:
+    return _fit("king_county", examples_path, model_path, metrics_path, KingCountyPreprocessor())
+
+
+def train_los_angeles(
+    examples_path: Path = LOS_ANGELES_EXAMPLES_PATH,
+    model_path: Path = Path("artifacts/los_angeles/model.joblib"),
+    metrics_path: Path = Path("artifacts/los_angeles/metrics.json"),
+) -> tuple[Path, Path]:
+    return _fit("los_angeles", examples_path, model_path, metrics_path, LosAngelesPreprocessor())
+
+
+def train_boston(
+    examples_path: Path = BOSTON_EXAMPLES_PATH,
+    model_path: Path = Path("artifacts/boston/model.joblib"),
+    metrics_path: Path = Path("artifacts/boston/metrics.json"),
+) -> tuple[Path, Path]:
+    return _fit("boston", examples_path, model_path, metrics_path, BostonPreprocessor())
+
+
+def train_san_francisco(
+    examples_path: Path = SAN_FRANCISCO_EXAMPLES_PATH,
+    model_path: Path = Path("artifacts/san_francisco/model.joblib"),
+    metrics_path: Path = Path("artifacts/san_francisco/metrics.json"),
+) -> tuple[Path, Path]:
+    return _fit("san_francisco", examples_path, model_path, metrics_path, SanFranciscoPreprocessor())
+
+
+_TRAINERS = {
+    "new_york": train_new_york,
+    "chicago": train_chicago,
+    "king_county": train_king_county,
+    "los_angeles": train_los_angeles,
+    "boston": train_boston,
+    "san_francisco": train_san_francisco,
+    "austin": train_austin,
+}
 
 
 def _fit(

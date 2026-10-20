@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
+from nextvisit.addresses import address_part
 from nextvisit.cities.base import CitySpec
 
 SPEC = CitySpec(
@@ -25,6 +26,7 @@ _SOURCE_COLUMNS = (
     "facility_id",
     "inspectionid",
     "restaurant_name",
+    "address",
     "zip_code",
     "inspection_date",
     "process_description",
@@ -37,6 +39,7 @@ SCHEMA = {
     "facility_id": pl.String,
     "inspection_id": pl.String,
     "name": pl.String,
+    "address": pl.String,
     "zip": pl.String,
     "inspection_date": pl.Date,
     "inspection_type": pl.String,
@@ -47,7 +50,7 @@ SCHEMA = {
 
 
 def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
-    """Rename source fields. Address and phone are not kept."""
+    """Rename source fields. Phone is never selected. The address line is already complete."""
     cleaned: list[dict[str, object]] = []
     for row in rows:
         cleaned.append(
@@ -55,6 +58,7 @@ def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
                 "facility_id": _text(row.get("facility_id")),
                 "inspection_id": _text(row.get("inspectionid")),
                 "name": _text(row.get("restaurant_name")),
+                "address": address_part(row.get("address")),
                 "zip": _zip(row.get("zip_code")),
                 "inspection_date": _parse_date(row.get("inspection_date")),
                 "inspection_type": _text(row.get("process_description")),

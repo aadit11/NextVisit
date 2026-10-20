@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
+from nextvisit.addresses import format_address
 from nextvisit.cities.base import CitySpec
 
 SPEC = CitySpec(
@@ -26,6 +27,9 @@ _SOURCE_COLUMNS = (
     "inspection_id",
     "license_",
     "dba_name",
+    "address",
+    "city",
+    "state",
     "facility_type",
     "risk",
     "zip",
@@ -41,6 +45,7 @@ SCHEMA = {
     "inspection_id": pl.String,
     "license": pl.String,
     "name": pl.String,
+    "address": pl.String,
     "facility_type": pl.String,
     "risk": pl.String,
     "zip": pl.String,
@@ -79,6 +84,7 @@ def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
                 "inspection_id": _text(row.get("inspection_id")),
                 "license": _text(row.get("license_")),
                 "name": _text(row.get("dba_name")),
+                "address": format_address(row.get("address"), row.get("city"), row.get("state"), row.get("zip")),
                 "facility_type": _text(row.get("facility_type")),
                 "risk": _text(row.get("risk")),
                 "zip": _text(row.get("zip")),

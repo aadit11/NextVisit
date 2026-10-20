@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
+from nextvisit.addresses import format_address, street_line
 from nextvisit.cities.base import CitySpec
 
 SPEC = CitySpec(
@@ -24,6 +25,8 @@ RAW_PATH = Path("data/raw/new_york/inspections.parquet")
 _SOURCE_COLUMNS = (
     "camis",
     "dba",
+    "building",
+    "street",
     "boro",
     "cuisine_description",
     "inspection_date",
@@ -41,6 +44,7 @@ _SOURCE_COLUMNS = (
 SCHEMA = {
     "camis": pl.String,
     "name": pl.String,
+    "address": pl.String,
     "borough": pl.String,
     "cuisine": pl.String,
     "inspection_date": pl.Date,
@@ -64,6 +68,12 @@ def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
             {
                 "camis": _text(row.get("camis")),
                 "name": _text(row.get("dba")),
+                "address": format_address(
+                    street_line(row.get("building"), row.get("street")),
+                    row.get("boro"),
+                    "NY",
+                    row.get("zipcode"),
+                ),
                 "borough": _text(row.get("boro")),
                 "cuisine": _text(row.get("cuisine_description")),
                 "inspection_date": _parse_date(row.get("inspection_date")),

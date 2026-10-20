@@ -14,15 +14,21 @@ export type WorkOrderItem = {
   step: string;
 };
 
+export type HistoryCode = {
+  code: string;
+  description: string | null;
+};
+
 export type Restaurant = {
   city: string;
   restaurant_id: string;
   name: string | null;
+  address: string | null;
   cuisine: string | null;
   abstained: boolean;
   probability: number | null;
   label: string;
-  codes: string[];
+  codes: HistoryCode[];
   work_order: WorkOrderItem[];
   work_order_reason: string | null;
 };
@@ -36,6 +42,13 @@ export class ApiError extends Error {
   }
 }
 
+export type RestaurantHit = {
+  restaurant_id: string;
+  name: string;
+  area: string | null;
+  address: string | null;
+};
+
 export async function fetchCities(): Promise<City[]> {
   return readJson<City[]>(await request("/cities"));
 }
@@ -43,6 +56,11 @@ export async function fetchCities(): Promise<City[]> {
 export async function fetchRestaurant(cityId: string, restaurantId: string): Promise<Restaurant> {
   const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}`;
   return readJson<Restaurant>(await request(path));
+}
+
+export async function searchRestaurants(cityId: string, query: string): Promise<RestaurantHit[]> {
+  const path = `/cities/${encodeURIComponent(cityId)}/restaurants?q=${encodeURIComponent(query)}`;
+  return readJson<RestaurantHit[]>(await request(path));
 }
 
 async function request(path: string): Promise<Response> {
