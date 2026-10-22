@@ -1,4 +1,5 @@
 const base = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+const TOKEN_KEY = "nextvisit-token";
 
 export type City = {
   id: string;
@@ -25,12 +26,87 @@ export type Restaurant = {
   name: string | null;
   address: string | null;
   cuisine: string | null;
+  area: string | null;
+  hours: string | null;
+  grade: string | null;
+  score: number | null;
+  last_inspection_date: string | null;
+  serious: boolean | null;
+  latitude: number | null;
+  longitude: number | null;
+  average_stars: number | null;
+  review_count: number;
   abstained: boolean;
   probability: number | null;
   label: string;
+  trend: "cleaner" | "steady" | "worse" | null;
+  recent_visit_count: number;
+  recent_serious_count: number;
+  peer_count: number;
+  peer_graded_count: number;
+  peer_standing: "better" | "typical" | "worse" | null;
+  score_trend: "falling" | "rising" | "steady" | null;
   codes: HistoryCode[];
   work_order: WorkOrderItem[];
   work_order_reason: string | null;
+  brief: string;
+  brief_reason: string | null;
+};
+
+export type MapPlace = {
+  restaurant_id: string;
+  name: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+};
+
+export type RestaurantHit = {
+  restaurant_id: string;
+  name: string;
+  area: string | null;
+  address: string | null;
+  cuisine: string | null;
+  grade: string | null;
+  last_inspection_date: string | null;
+  serious: boolean | null;
+  latitude: number | null;
+  longitude: number | null;
+  average_stars: number | null;
+  review_count: number;
+};
+
+export type Facets = {
+  areas: string[];
+  cuisines: string[];
+  grades: string[];
+};
+
+export type Account = {
+  token: string;
+  name: string;
+  email: string;
+};
+
+export type Review = {
+  author: string;
+  stars: number;
+  comment: string;
+  created_at: string;
+};
+
+export type ReviewList = {
+  average_stars: number | null;
+  review_count: number;
+  mine: { stars: number; comment: string } | null;
+  reviews: Review[];
+};
+
+export type Filters = {
+  area: string;
+  cuisine: string;
+  grade: string;
+  clean: boolean;
 };
 
 export class ApiError extends Error {
@@ -42,31 +118,80 @@ export class ApiError extends Error {
   }
 }
 
-export type RestaurantHit = {
-  restaurant_id: string;
-  name: string;
-  area: string | null;
-  address: string | null;
-};
+export function readToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function storeToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
 
 export async function fetchCities(): Promise<City[]> {
   return readJson<City[]>(await request("/cities"));
 }
 
+export async function fetchMap(cityId: string): Promise<MapPlace[]> {
+  return readJson<MapPlace[]>(await request(`/cities/${encodeURIComponent(cityId)}/map`));
+}
+
+export async function fetchFacets(cityId: string): Promise<Facets> {
+  return readJson<Facets>(await request(`/cities/${encodeURIComponent(cityId)}/facets`));
+}
+
 export async function fetchRestaurant(cityId: string, restaurantId: string): Promise<Restaurant> {
-  const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}`;
+  const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}?include_work_order=false`;
   return readJson<Restaurant>(await request(path));
 }
 
-export async function searchRestaurants(cityId: string, query: string): Promise<RestaurantHit[]> {
-  const path = `/cities/${encodeURIComponent(cityId)}/restaurants?q=${encodeURIComponent(query)}`;
+export async function searchRestaurants(cityId: string, query: string, filters: Filters): Promise<RestaurantHit[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  if (filters.area) params.set("area", filters.area);
+  if (filters.cuisine) params.set("cuisine", filters.cuisine);
+  if (filters.grade) params.set("grade", filters.grade);
+  if (filters.clean) params.set("clean", "true");
+  const path = `/cities/${encodeURIComponent(cityId)}/restaurants?${params.toString()}`;
   return readJson<RestaurantHit[]>(await request(path));
 }
 
-async function request(path: string): Promise<Response> {
+export async function registerAccount(name: string, email: string, password: string): Promise<Account> {
+  return readJson<Account>(await send("/account/register", { name, email, password }));
+}
+
+export async function loginAccount(email: string, password: string): Promise<Account> {
+  return readJson<Account>(await send("/account/login", { email, password }));
+}
+
+export async function fetchMe(): Promise<Account> {
+  const token = readToken();
+  return readJson<Account>(await request("/account/me", token));
+}
+
+export async function fetchReviews(cityId: string, restaurantId: string): Promise<ReviewList> {
+  const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}/reviews`;
+  return readJson<ReviewList>(await request(path, readToken()));
+}
+
+export async function saveReview(cityId: string, restaurantId: string, stars: number, comment: string): Promise<ReviewList> {
+  const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}/reviews`;
+  return readJson<ReviewList>(await send(path, { stars, comment }, readToken()));
+}
+
+async function request(path: string, token: string | null = null): Promise<Response> {
+  return call(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+}
+
+async function send(path: string, body: unknown, token: string | null = null): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return call(path, { method: "POST", headers, body: JSON.stringify(body) });
+}
+
+async function call(path: string, init: RequestInit): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(`${base}${path}`);
+    response = await fetch(`${base}${path}`, init);
   } catch {
     throw new ApiError("The lookup service is unreachable.", 0);
   }

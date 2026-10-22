@@ -1,129 +1,122 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Restaurant } from "./api";
-import { WorkOrder } from "./WorkOrder";
+import { codeIntro, decisionSentence, inspectionAge, peerSentence, readCode, recordGuide, scoreTrendSentence, statusSentence, trendSentence } from "./reading";
+import { Reviews } from "./Reviews";
+
+const CODE_PREVIEW = 6;
 
 type ResultCardProps = {
   restaurant: Restaurant;
-  hasWorkOrder: boolean;
-  activeCode: string | null;
-  onToggleCode: (code: string) => void;
+  signedIn: boolean;
+  onReviews: () => void;
+  onLogin: () => void;
 };
 
-export function ResultCard({ restaurant, hasWorkOrder, activeCode, onToggleCode }: ResultCardProps) {
-  useEffect(() => {
-    if (!activeCode) return;
-    document.getElementById(`step-${activeCode}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeCode]);
-
-  if (restaurant.abstained || restaurant.probability === null) {
-    return (
-      <article className="result abstained" aria-live="polite">
-        <p className="eyebrow">No score</p>
-        <h2>{restaurant.name ?? "This restaurant"}</h2>
-        {restaurant.address ? <p className="street">{restaurant.address}</p> : null}
-        <p className="abstain-line">No score. This restaurant has no completed inspection to learn from.</p>
-        <p className="meta">{restaurant.restaurant_id}</p>
-      </article>
-    );
-  }
-
+export function ResultCard({ restaurant, signedIn, onReviews, onLogin }: ResultCardProps) {
+  const [codesOpen, setCodesOpen] = useState(false);
+  const facts = [
+    restaurant.grade,
+    restaurant.last_inspection_date,
+    restaurant.score != null ? `Score ${restaurant.score}` : null,
+  ].filter(Boolean);
+  const status = statusSentence(restaurant.city, restaurant.serious);
+  const age = inspectionAge(restaurant.last_inspection_date);
+  const trend = restaurant.city === "austin"
+    ? scoreTrendSentence(restaurant.score_trend)
+    : trendSentence(restaurant.trend, restaurant.recent_visit_count, restaurant.recent_serious_count);
+  const trendClass = restaurant.city === "austin"
+    ? restaurant.score_trend === "falling"
+      ? "trend-worse"
+      : restaurant.score_trend === "rising"
+        ? "trend-cleaner"
+        : "trend-steady"
+    : `trend-${restaurant.trend}`;
+  const decision = decisionSentence(restaurant);
+  const peers = peerSentence(
+    restaurant.cuisine,
+    restaurant.area,
+    restaurant.grade,
+    restaurant.peer_count,
+    restaurant.peer_graded_count,
+    restaurant.peer_standing,
+  );
+  const visibleCodes = codesOpen ? restaurant.codes : restaurant.codes.slice(0, CODE_PREVIEW);
+  const hiddenCodes = restaurant.codes.length - visibleCodes.length;
   return (
     <article className="result" aria-live="polite">
-      <div className="result-top">
-        <Gauge probability={restaurant.probability} />
-        <div>
-          {restaurant.cuisine ? <p className="eyebrow">{restaurant.cuisine}</p> : null}
-          <h2>{restaurant.name ?? restaurant.restaurant_id}</h2>
-          {restaurant.address ? <p className="street">{restaurant.address}</p> : null}
-          <p className="label-sentence">{restaurant.label}</p>
-          <p className="meta">
-            {restaurant.restaurant_id}
-            <span>Exact probability {restaurant.probability.toFixed(4)}</span>
-          </p>
-        </div>
-      </div>
-      {restaurant.codes.length > 0 ? (
+      {restaurant.cuisine ? <p className="eyebrow">{restaurant.cuisine}</p> : null}
+      <h2>{restaurant.name ?? restaurant.restaurant_id}</h2>
+      {restaurant.address ? <p className="street">{restaurant.address}</p> : null}
+      {restaurant.hours ? <p className="hours">Hours {restaurant.hours}</p> : null}
+      {facts.length > 0 ? <p className="meta">{facts.join(" · ")}</p> : null}
+      {status ? <p className={restaurant.serious ? "serious" : "clean-line"}>{status}</p> : null}
+      <section className="reading" aria-label="How to read this record">
+        <h3>Last inspection</h3>
+        {age ? <p className="inspection-age">{age}</p> : null}
+        {trend ? <p className={`inspection-trend ${trendClass}`}>{trend}</p> : null}
+        {peers ? (
+          <>
+            <h3>Nearby</h3>
+            <p className={`inspection-peer standing-${restaurant.peer_standing ?? "count"}`}>{peers}</p>
+          </>
+        ) : null}
+        <p>{recordGuide(restaurant.city)}</p>
+        {decision ? (
+          <>
+            <h3>Next inspection</h3>
+            <p className={restaurant.probability != null && restaurant.probability >= 0.5 ? "serious" : "clean-line"}>{decision}</p>
+          </>
+        ) : null}
+      </section>
+      {restaurant.brief ? (
+        <section className="brief" aria-label="Hygiene brief">
+          <h3>Hygiene brief</h3>
+          <p>{restaurant.brief}</p>
+        </section>
+      ) : null}
+      <p className="osm-note">OpenStreetMap supplies hours, and cuisine when the city file has none.</p>
       <section className="codes" aria-label="Violation codes">
         <header>
-          <h3>Codes in the history</h3>
-          <p>
-            {restaurant.work_order.length > 0
-              ? "The city's wording. Select a code to find its closing step."
-              : "The city's wording for each code already on the record."}
-          </p>
+          <h3>Violation codes</h3>
         </header>
-        <div className="code-list">
-          {restaurant.codes.map((item) => (
-            <button
-              key={item.code}
-              type="button"
-              className={activeCode === item.code ? "code active" : "code"}
-              aria-pressed={activeCode === item.code}
-              onClick={() => onToggleCode(item.code)}
-            >
-              <strong>{item.code}</strong>
-              <span>{item.description ?? "This city did not publish wording for this code."}</span>
-            </button>
-          ))}
-        </div>
+        <p className="code-intro">{codeIntro(restaurant.city)}</p>
+        {restaurant.codes.length > 0 ? (
+          <div className="code-list">
+            {visibleCodes.map((item) => {
+              const reading = readCode(item.description);
+              return (
+                <article key={item.code} className="code-note">
+                  <strong>{item.code}</strong>
+                  <div>
+                    <p className="topic">{reading.topic}</p>
+                    <p className="code-plain">{reading.plain}</p>
+                    {item.description ? (
+                      <p className="code-official">
+                        <span>Department wording</span>
+                        {item.description}
+                      </p>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="empty-order">This record has no violation codes.</p>
+        )}
+        {hiddenCodes > 0 ? (
+          <button type="button" className="text-button more-codes" onClick={() => setCodesOpen(true)}>
+            Show {hiddenCodes} more codes
+          </button>
+        ) : null}
       </section>
-      ) : null}
-      <WorkOrder
-        items={restaurant.work_order}
-        hasWorkOrder={hasWorkOrder}
-        reason={restaurant.work_order_reason}
-        activeCode={activeCode}
+      <Reviews
+        cityId={restaurant.city}
+        restaurantId={restaurant.restaurant_id}
+        signedIn={signedIn}
+        onChange={onReviews}
+        onLogin={onLogin}
       />
     </article>
   );
-}
-
-function Gauge({ probability }: { probability: number }) {
-  const radius = 58;
-  const circumference = 2 * Math.PI * radius;
-  const [shown, setShown] = useState(0);
-  useEffect(() => {
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) {
-      setShown(clamp(probability));
-      return;
-    }
-    const start = performance.now();
-    let frame = 0;
-    const tick = (now: number) => {
-      const progress = Math.min(1, (now - start) / 780);
-      const eased = 1 - (1 - progress) ** 3;
-      setShown(clamp(probability) * eased);
-      if (progress < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [probability]);
-  const tone = probability >= 0.75 ? "high" : probability >= 0.45 ? "mid" : "low";
-  const caption = tone === "high" ? "Higher on this city's scale" : tone === "mid" ? "Middle of this city's scale" : "Lower on this city's scale";
-  return (
-    <div className={`gauge ${tone}`}>
-      <svg viewBox="0 0 140 140" aria-hidden="true">
-        <circle cx="70" cy="70" r={radius} />
-        <circle
-          className="value"
-          cx="70"
-          cy="70"
-          r={radius}
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - shown)}
-        />
-      </svg>
-      <strong>{formatPercent(shown)}</strong>
-      <em>{caption}</em>
-    </div>
-  );
-}
-
-function formatPercent(probability: number): string {
-  return `${(Math.round(probability * 1000) / 10).toFixed(1)}%`;
-}
-
-function clamp(value: number): number {
-  return Math.min(1, Math.max(0, value));
 }

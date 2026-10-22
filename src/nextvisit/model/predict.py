@@ -18,6 +18,7 @@ from nextvisit.cities.los_angeles import INSPECTIONS_PATH as LOS_ANGELES_RAW_PAT
 from nextvisit.cities.los_angeles import SPEC as LOS_ANGELES_SPEC
 from nextvisit.cities.new_york import RAW_PATH, SPEC
 from nextvisit.cities.san_francisco import RAW_PATH as SAN_FRANCISCO_RAW_PATH
+from nextvisit.history import recent_trend, score_direction
 from nextvisit.cities.san_francisco import SPEC as SAN_FRANCISCO_SPEC
 from nextvisit.model.train import (
     AUSTIN_CATEGORICAL,
@@ -52,6 +53,14 @@ class UnknownRestaurant(LookupError):
     """This CAMIS is not in the New York extract."""
 
 
+def _trend_fields(records: list[dict[str, object]]) -> dict[str, object]:
+    return recent_trend([bool(visit["positive"]) for visit in records])
+
+
+def _score_trend(records: list[dict[str, object]]) -> str | None:
+    return score_direction([visit.get("score") for visit in records])
+
+
 def predict_new_york(camis: str) -> dict[str, object]:
     visits = _inspections().filter(pl.col("camis") == camis).sort("inspection_date")
     if visits.height == 0:
@@ -69,6 +78,7 @@ def predict_new_york(camis: str) -> dict[str, object]:
             "label": SPEC.label,
             "codes": [],
             "work_order": [],
+            **_trend_fields([]),
         }
 
     records = visits.to_dicts()
@@ -92,6 +102,7 @@ def predict_new_york(camis: str) -> dict[str, object]:
         "label": SPEC.label,
         "codes": _history_codes(records),
         "work_order": [],
+        **_trend_fields(records),
     }
 
 
@@ -113,6 +124,7 @@ def predict_chicago(license_id: str) -> dict[str, object]:
             "label": CHICAGO_SPEC.label,
             "codes": [],
             "work_order": [],
+            **_trend_fields([]),
         }
 
     records = visits.to_dicts()
@@ -136,6 +148,7 @@ def predict_chicago(license_id: str) -> dict[str, object]:
         "label": CHICAGO_SPEC.label,
         "codes": _history_codes(records),
         "work_order": [],
+        **_trend_fields(records),
     }
 
 
@@ -289,6 +302,8 @@ def predict_austin(facility_id: str) -> dict[str, object]:
             "label": AUSTIN_SPEC.label,
             "codes": [],
             "work_order": [],
+            **_trend_fields([]),
+            "score_trend": None,
         }
 
     records = visits.to_dicts()
@@ -312,6 +327,8 @@ def predict_austin(facility_id: str) -> dict[str, object]:
         "label": AUSTIN_SPEC.label,
         "codes": [],
         "work_order": [],
+        **_trend_fields(records),
+        "score_trend": _score_trend(records),
     }
 
 
@@ -492,6 +509,7 @@ def _lookup(
             "label": spec.label,
             "codes": [],
             "work_order": [],
+            **_trend_fields([]),
         }
     records = visits.to_dicts()
     latest = records[-1]
@@ -513,6 +531,7 @@ def _lookup(
         "label": spec.label,
         "codes": _history_codes(records),
         "work_order": [],
+        **_trend_fields(records),
     }
 
 

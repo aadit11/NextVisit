@@ -4,6 +4,7 @@ from datetime import date
 
 import polars as pl
 
+from nextvisit.cities.boston import parse_location
 from nextvisit.cities.king_county import normalize_rows as normalize_king_county
 from nextvisit.cities.king_county import parse_violation
 from nextvisit.cities.san_francisco import parse_violation_codes
@@ -95,6 +96,15 @@ def test_los_angeles_four_points_is_serious_and_the_three_cities_drop_out() -> N
     assert examples.height == 1
     assert examples["prior_inspection_count"][0] == 1
     assert examples["label"][0] == 0
+
+
+def test_boston_location_is_a_latitude_and_longitude() -> None:
+    assert parse_location("(42.35925954972639, -71.05890048027378)") == (
+        42.35925954972639,
+        -71.05890048027378,
+    )
+    assert parse_location(None) == (None, None)
+    assert parse_location("(0, 0)") == (None, None)
 
 
 def test_boston_fail_is_positive_and_a_closure_is_left_out() -> None:

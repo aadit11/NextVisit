@@ -1,6 +1,8 @@
 # Nextvisit development plan
 
-Build one city until a lookup returns a real probability, then repeat the adapter for the other cities. Do not train a shared model. Do not invent a score when a file or a history is missing.
+Build one city until a diner can open a restaurant and judge its hygiene, then repeat the adapter for the other cities. Do not train a shared model. Do not invent a visit, a grade, or a code when the file does not have it. Do not show a closing list or a percentage on the diner page.
+
+The last inspection stays the health department's record. Around it, the page shows how old that inspection is, whether recent visits are getting cleaner or worse, what kind of problem the codes describe, and how this place compares with the same cuisine in the same area. Two model outputs sit under that: a short hygiene brief that may use only those facts, and a sentence from the city's existing model about whether the next inspection is likely to find a serious problem again.
 
 What already exists: the city registry, the leakage check, the time split, the repeat-last-visit baseline, the work-order faithfulness check, empty data folders, and an API that lists cities and returns 501 for a restaurant.
 
@@ -9,7 +11,7 @@ What already exists: the city registry, the leakage check, the time split, the r
 1. Install Python 3.12 and `uv`.
 2. From the `NextVisit` repo root, run `uv sync`.
 3. Run `uv run pytest`. The current tests must pass before new work: city registry, leakage, time split, baseline, faithfulness, and Austin's empty work order.
-4. Copy `.env.example` to `.env`. Leave the work-order keys empty until step 8.
+4. Copy `.env.example` to `.env`. Leave the brief keys empty until step 7.
 
 Done when `uv run pytest` is green on a clean checkout.
 
@@ -36,10 +38,10 @@ Done when a fixture with two violations on one date becomes one inspection, an u
 ## 4. Examples and the time split
 
 1. Sort each `camis` by inspection date.
-2. Create an example only when a cycle inspection has a later cycle inspection. The later visit is the target. The label is that visit's positive flag.
+2. Create an example only when a cycle inspection has a later cycle inspection. The later visit is the target. The label is that visit's positive flag: a critical violation on the next cycle inspection.
 3. Features may use cuisine, borough, days since the previous cycle inspection, prior violation counts and recency, whether prior visits were positive, and the previous visit's score and grade.
 4. Call `assert_features_before_target` while building features. The target visit's score, grade, and violation codes stay out.
-5. Restaurants with no earlier cycle inspection are not examples. Lookups for them abstain.
+5. Restaurants with no earlier cycle inspection are not examples. Lookups for them have no decision sentence.
 6. After the example table exists, choose one cutoff date and save it in `artifacts/new_york/cutoff.json`. `assign_split` sends target dates on or before that cutoff to train and later dates to test.
 7. Write `data/processed/new_york/examples.parquet`.
 
@@ -47,66 +49,69 @@ Done when `tests/test_leakage.py` fails a same-day feature and `tests/test_split
 
 ## 5. Train and score New York
 
-1. Fit three models on the training period only: `repeat_last_visit`, logistic regression, and LightGBM.
+1. Fit three models on the training period only: `repeat_last_visit`, logistic regression, and LightGBM. `repeat_last_visit` predicts the previous visit's outcome.
 2. Calibrate LightGBM with `CalibratedClassifierCV` on training-period data only.
 3. Score the test period with precision-recall AUC, Brier score, and the share of true positive visits captured in the top 10% of predicted risk.
 4. Write all three models' metrics to `artifacts/new_york/metrics.json`. Write the calibrated LightGBM model to `artifacts/new_york/model.joblib`.
 5. If LightGBM does not beat the baseline on precision-recall AUC, keep the baseline numbers in the file.
+6. The diner page never shows the probability. It shows one sentence: the next inspection is likely to find a serious problem again, or it is likely to come back clean. The sentence is omitted when the lookup abstains.
 
 Done when `uv run python scripts/train.py --city new_york` finishes without a hand-typed metric, and both artifact files exist and are gitignored.
 
 ## 6. New York lookup
 
 1. Replace the 501 response in `src/nextvisit/api/main.py` for a New York id that has history.
-2. `GET /cities/new_york/restaurants/{camis}` returns the name, cuisine, calibrated probability, the label sentence from `CitySpec`, the violation codes that drove the score, and `abstained: false`.
-3. A CAMIS with no prior cycle inspection returns `abstained: true`, no probability, and an empty code list.
-4. An unknown CAMIS returns 404.
+2. `GET /cities/new_york/restaurants/{camis}` returns the name, cuisine, and the last inspection from the file: date, grade, score, and violation codes. It also returns the inspection age, the trend of recent visits (`cleaner`, `steady`, or `worse`), the problem kind for those codes, the peer comparison, the decision sentence, and `abstained: false`.
+3. The problem kind is one of `illness`, `room`, or `paperwork`. Illness covers pests, food temperature, handwashing, and contaminated food. Room covers plumbing, restrooms, and garbage. Everything else on the record is paperwork, including equipment the diner does not see. A kind is returned only when a code on the record falls in it.
+4. The peer comparison counts restaurants of the same cuisine in the same area and says whether this last grade is better than most, typical, or worse than most. It is a count, not a model.
+5. A CAMIS with no prior cycle inspection returns `abstained: true` and no decision sentence. The last inspection is still returned when the file has one.
+6. An unknown CAMIS returns 404.
+7. The response does not include a probability and does not include a work order.
 
-Done when a real CAMIS from the processed file returns a probability between 0 and 1, and a `1900-01-01` permit abstains.
+Done when a real CAMIS returns the age, trend, problem kind, peer line, and decision sentence from the file and the model, and a `1900-01-01` permit abstains with no decision sentence.
 
-## 7. Closing work order
+## 7. Hygiene brief
 
-1. Implement the hosted call in `src/nextvisit/workorder/generate.py` for cities with `has_work_order` true.
-2. Send only the cuisine, the predicted codes, and the official descriptions for those codes.
-3. Require JSON items with `station`, `violation_code`, `source_span`, and `step`. Stations stay inside the set in `faithfulness.py`.
-4. Run `faithfulness_errors` before the API returns the order. On failure, return the probability and the codes with an empty work order and a reason, not a rewritten paragraph.
-5. For New York, `require_cuisine` is true because `cuisine_in_source` is true.
-6. Read `WORKORDER_API_KEY`, `WORKORDER_BASE_URL`, and `WORKORDER_MODEL` from the environment. `pytest` and training must still pass with those unset.
+1. Implement one hosted call in `src/nextvisit/brief/generate.py`. The diner page does not show a closing work order.
+2. Send only facts already computed for this restaurant: the inspection date, grade, score, trend, problem kinds, peer comparison, and the official code text on the record.
+3. Require a short brief of a few sentences. A date, grade, score, trend, kind, or code in the brief must appear in those facts.
+4. Run that check before the API returns the brief. On failure, return an empty brief and a reason, not a rewritten paragraph.
+5. Read `BRIEF_API_KEY`, `BRIEF_BASE_URL`, and `BRIEF_MODEL` from the environment. `pytest` and training must still pass with those unset.
 
-Done when `tests/test_faithfulness.py` still rejects an extra code and a span that is not in the codebook, and one live New York lookup shows a step that contains both the cuisine and an exact official span.
+Done when a brief that mentions a pest problem the record does not contain is rejected, and one live New York lookup shows a brief that a diner can read.
 
 ## 8. Web page for New York
 
 1. In `web/`, run `npm install` and `npm run dev`.
 2. Load cities from `GET /cities`.
-3. On submit, call `GET /cities/{city}/restaurants/{id}` and render the probability, the label sentence, the codes, and the work order.
-4. Render abstain as a finished state: the name and the line "No score. This restaurant has no completed inspection to learn from."
-5. Render an empty Austin work order without treating it as an error. Austin's button path can wait until step 10, but the empty-order state should already be visible in the component.
+3. On submit, call `GET /cities/{city}/restaurants/{id}` and render the last inspection, its age, the trend, the problem kind, the peer comparison, the hygiene brief, and the decision sentence. Do not render a percentage or a closing list.
+4. Render abstain as a finished state: the name, the last inspection when the file has one, and no decision sentence.
+5. Keep the violation codes on the card, with the plain reading of each code, under the brief.
 
 Done when a New York CAMIS typed into the page matches the API JSON.
 
 ## 9. Repeat the adapter, one city at a time
 
-Finish the same download, collapse, example, train, and lookup path for each city before starting the next. Use that city's label from its `CitySpec`. Keep a separate cutoff, metrics file, and `model.joblib`.
+Finish the same download, collapse, example, train, and diner lookup for each city before starting the next. Keep a separate cutoff, metrics file, and `model.joblib`. The decision sentence uses that city's own meaning of a serious problem. The page still does not show the probability.
 
 Do them in this order:
 
-1. **Chicago.** One row per inspection in the source, violations packed in text. Label: next result is Fail. Parse violation numbers and comments into the codebook. No cuisine field, so the work-order step does not have to contain a cuisine name.
-2. **King County.** One row per violation, 2021 onward. Label: the next inspection includes a violation the county marks as serious. Confirm the serious-class values from the file before coding them.
-3. **Los Angeles County.** Join the inspections file and the violations file on the inspection id. Leave out Pasadena, Long Beach, and Vernon. Label: the next inspection includes a serious points violation, using the county's own point rule from the file.
-4. **Boston.** Label: the next inspection result is a fail. Violation description and level come from the inspection rows.
-5. **San Francisco.** Label: the next status is Conditional Pass or Closure. Build a work order only when the row includes official wording for the code. Otherwise return the probability, the codes, and an empty work order.
+1. **Chicago.** One row per inspection in the source, violations packed in text. A serious problem in the sentence is a Fail. Parse violation numbers and comments into the codebook.
+2. **King County.** One row per violation, 2021 onward. A serious problem is a violation the county marks as serious.
+3. **Los Angeles County.** Join the inspections file and the violations file on the inspection id. Leave out Pasadena, Long Beach, and Vernon. A serious problem is a serious points violation, using the county's own point rule from the file.
+4. **Boston.** A serious problem is a fail. Violation description and level come from the inspection rows.
+5. **San Francisco.** A serious problem is a Conditional Pass or a Closure. The brief may quote official wording only when the row includes it.
 
-Done when each city has its own metrics file, a held-out test split, and one real id that returns a probability. `scripts/download.py --city all` and `scripts/train.py --city all` complete.
+Done when each city has its own metrics file, a held-out test split, and one real id whose page shows the age, trend, peer line, brief, and decision sentence. `scripts/download.py --city all` and `scripts/train.py --city all` complete.
 
 ## 10. Austin
 
 1. Download the scores file. The restaurant id is `facility_id`. Keep routine inspections.
-2. Label: the next routine score is below 90.
-3. Train and serve the probability the same way as the other cities.
-4. Do not call the work-order model. `build_work_order("austin", ...)` stays an empty list.
+2. A serious problem in the decision sentence is a next routine score below 90. The page shows the sentence, not the probability.
+3. The brief uses the last score, how old it is, and whether recent scores are falling. It does not mention violation codes.
+4. Do not call a work-order model. `build_work_order("austin", ...)` stays an empty list, and the diner page does not show it.
 
-Done when `tests/test_austin_abstains_work_order.py` still passes and an Austin facility id returns a probability with an empty work order.
+Done when `tests/test_austin_abstains_work_order.py` still passes and an Austin facility id shows the score, its age, the score trend, and a decision sentence with no codes.
 
 ## 11. Name search
 
@@ -118,7 +123,7 @@ Done when two restaurants that share a name in the same city appear as two rows,
 
 ## 12. Record the results
 
-1. After all seven metrics files exist, add a results table to `README.md` by reading those files. Do not type the numbers in by hand.
+1. Keep the results table in `README.md` as the score of the model behind the decision sentence. Read it from `artifacts/{city}/metrics.json`. The columns stay precision-recall AUC, Brier, and top-decile capture. Do not type the numbers in by hand. The diner page does not print this table.
 2. State the cutoff date and the test window next to each city.
 3. Leave a baseline row in every city, including a city where LightGBM loses.
 

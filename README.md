@@ -1,24 +1,29 @@
 # Nextvisit
 
-Nextvisit ranks a restaurant by the chance its next inspection goes badly, using that city's public inspection history. The search starts with a city. Each city has its own label, its own codebook, and its own model.
+Nextvisit helps a diner judge a restaurant's hygiene. The page starts with a city, then shows the street, the last inspection from the health department, and reviews written in this app. Hours come from OpenStreetMap. Each city has its own model. The page does not show a percentage, and it does not show a closing list for the kitchen.
 
-Seven jurisdictions are wired in:
+Beside the last inspection, the card shows:
 
-| City id | Outcome the model ranks | Work order |
-|---|---|---|
-| `new_york` | Next cycle inspection includes a critical violation | Yes. Cuisine is in the file. |
-| `chicago` | Next inspection result is Fail | Yes |
-| `king_county` | Next inspection includes a serious violation | Yes |
-| `los_angeles` | Next inspection includes a serious points violation | Yes |
-| `boston` | Next inspection result is a fail | Yes |
-| `san_francisco` | Next status is Conditional Pass or Closure | Yes, when the file includes the code text |
-| `austin` | Next routine score is below 90 | No. The file has scores only. |
+- how old that inspection is
+- whether recent visits are getting cleaner or worse
+- what kind of problem the codes describe: illness (pests, food temperature, handwashing, contaminated food), the room (plumbing, restrooms, garbage), or paperwork and equipment
+- how this place compares with the same cuisine in the same area
 
-A language model is not part of the ranker. After the codes are chosen, one JSON call writes a closing work order for cities that publish violation text. Python rejects a step that cites another code or drops a span of the official description. Austin returns an empty work order.
+Two model outputs follow. A hygiene brief is one short text written only from those facts; a date, grade, score, trend, or code that is not on the record drops the brief. The city's model becomes one sentence: the next inspection is likely to find a serious problem again, or it is likely to come back clean. The number stays off the card.
+
+| City id | A serious problem in that sentence |
+|---|---|
+| `new_york` | The next cycle inspection includes a critical violation |
+| `chicago` | The next result is Fail |
+| `king_county` | The next inspection includes a serious violation |
+| `los_angeles` | The next inspection includes a serious points violation |
+| `boston` | The next result is a fail |
+| `san_francisco` | The next status is Conditional Pass or Closure |
+| `austin` | The next routine score is below 90. The brief uses the score and does not mention codes. |
 
 ## Results
 
-Held-out scores below are written by `scripts/record_results.py`. Each number comes from `artifacts/{city}/metrics.json`, and the cutoff comes from `artifacts/{city}/cutoff.json`. A city stays out of the table until those files exist. Repeat last visit is the baseline row in every city.
+The tables below score the model behind the decision sentence. They are written by `scripts/record_results.py` from `artifacts/{city}/metrics.json`, and the cutoff comes from `artifacts/{city}/cutoff.json`. The diner page does not show these numbers. A city stays out of the table until those files exist. Repeat last visit is the baseline row in every city.
 
 <!-- results:start -->
 ### New York
@@ -148,7 +153,9 @@ src/nextvisit/
   model/baseline.py                      # repeat the previous visit
   model/train.py
   model/evaluate.py
-  workorder/generate.py
+  brief/generate.py                      # diner brief; claims must match the record
+  brief/faithfulness.py
+  workorder/generate.py                  # not shown on the diner page
   workorder/faithfulness.py
   api/main.py                            # GET /cities and GET /cities/{city}/restaurants/{id}
 
@@ -165,7 +172,7 @@ web/                                     # city, then name or id
 
 ## Status
 
-A city is scored after its own download, prepare, and train steps. Until then, download and train raise `NotImplementedError`, and a lookup returns 501. The results table lists only cities whose metrics files are on disk.
+A lookup shows the last inspection from the city file, then its age, trend, problem kind, peer comparison, hygiene brief, and decision sentence. Do not invent any of those when the record does not support them. Download and train raise `NotImplementedError` until that city's phase is built. The results table lists only cities whose metrics files are on disk.
 
 ## Commands
 
@@ -178,4 +185,4 @@ uv run uvicorn nextvisit.api.main:app --reload
 
 From `web/`: `npm install` then `npm run dev`.
 
-Copy `.env.example` to `.env` before a work-order call. Training does not need that key.
+Copy `.env.example` to `.env` before a hygiene-brief call. Training does not need that key.

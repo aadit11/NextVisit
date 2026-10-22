@@ -14,7 +14,8 @@ client = TestClient(app)
 
 
 def test_a_restaurant_with_history_returns_a_probability() -> None:
-    camis = pl.read_parquet(INSPECTIONS_PATH, columns=["camis"])["camis"][0]
+    visits = pl.read_parquet(INSPECTIONS_PATH, columns=["camis"]).group_by("camis").len()
+    camis = visits.filter(pl.col("len") >= 2)["camis"][0]
     response = client.get(f"/cities/new_york/restaurants/{camis}")
     assert response.status_code == 200
     body = response.json()
@@ -26,6 +27,9 @@ def test_a_restaurant_with_history_returns_a_probability() -> None:
     assert all(item["code"] for item in body["codes"])
     assert any(item["description"] for item in body["codes"])
     assert body["label"].startswith("Next cycle inspection")
+    assert body["trend"] in {"cleaner", "steady", "worse"}
+    assert body["recent_visit_count"] >= 2
+    assert 0 <= body["recent_serious_count"] <= body["recent_visit_count"]
 
 
 def test_an_uninspected_permit_abstains() -> None:
@@ -41,6 +45,8 @@ def test_an_uninspected_permit_abstains() -> None:
     assert body["abstained"] is True
     assert body["probability"] is None
     assert body["codes"] == []
+    assert body["trend"] is None
+    assert body["recent_visit_count"] == 0
     assert body["restaurant_id"] == camis
 
 

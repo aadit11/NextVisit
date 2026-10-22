@@ -1,5 +1,6 @@
 """Boston food-establishment inspections. One source row is one violation."""
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -38,6 +39,7 @@ _FIELDS = (
     "city",
     "state",
     "zip",
+    "location",
 )
 
 SCHEMA = {
@@ -51,7 +53,11 @@ SCHEMA = {
     "result": pl.String,
     "violation_code": pl.String,
     "violation_description": pl.String,
+    "latitude": pl.Float64,
+    "longitude": pl.Float64,
 }
+
+_POINT = re.compile(r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)")
 
 
 def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
@@ -59,6 +65,7 @@ def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
     cleaned: list[dict[str, object]] = []
     for row in rows:
         inspected = _parse_date(row.get("resultdttm"))
+        latitude, longitude = parse_location(row.get("location"))
         cleaned.append(
             {
                 "license": _text(row.get("licenseno")),
@@ -71,6 +78,8 @@ def normalize_rows(rows: list[dict[str, object]]) -> pl.DataFrame:
                 "result": _text(row.get("result")),
                 "violation_code": _text(row.get("violation")),
                 "violation_description": _text(row.get("violdesc")),
+                "latitude": latitude,
+                "longitude": longitude,
             }
         )
     return pl.DataFrame(cleaned, schema=SCHEMA)
@@ -116,6 +125,84 @@ def _page(client: httpx.Client, offset: int) -> list[dict[str, object]]:
     if not isinstance(records, list):
         raise RuntimeError("Boston download returned an unexpected payload.")
     return records
+
+
+def parse_location(value: object) -> tuple[float | None, float | None]:
+    """Read the published '(latitude, longitude)' field."""
+    text = _text(value)
+    if text is None:
+        return None, None
+    match = _POINT.search(text)
+    if match is None:
+        return None, None
+    latitude, longitude = float(match.group(1)), float(match.group(2))
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return None, None
+    if latitude == 0 or longitude == 0:
+        return None, None
+    return latitude, longitude
+
+
+def merge_coordinates(path: Path = RAW_PATH) -> None:
+    """Add the published location onto the Boston file already on disk."""
+    rows: list[dict[str, object]] = []
+    offset = 0
+    with httpx.Client(timeout=180) as client:
+        while True:
+            response = client.post(
+                SPEC.source_url,
+                json={
+                    "resource_id": RESOURCE_ID,
+                    "limit": PAGE_SIZE,
+                    "offset": offset,
+                    "fields": ["licenseno", "resultdttm", "location"],
+                    "sort": "_id",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            page = payload.get("result", {}).get("records")
+            if not isinstance(page, list):
+                raise RuntimeError("Boston location download returned an unexpected payload.")
+            if not page:
+                break
+            for row in page:
+                latitude, longitude = parse_location(row.get("location"))
+                rows.append(
+                    {
+                        "license": _text(row.get("licenseno")),
+                        "inspection_date": _parse_date(row.get("resultdttm")),
+                        "latitude": latitude,
+                        "longitude": longitude,
+                    }
+                )
+            offset += len(page)
+            print(f"boston locations: {offset}", flush=True)
+            if len(page) < PAGE_SIZE:
+                break
+    latest = (
+        pl.DataFrame(rows)
+        .drop_nulls(["license", "latitude", "longitude"])
+        .sort("inspection_date", nulls_last=False)
+        .unique(subset=["license"], keep="last")
+        .select(["license", "latitude", "longitude"])
+    )
+    raw = pl.read_parquet(path)
+    if "latitude" in raw.columns:
+        raw = raw.drop(["latitude", "longitude"])
+    updated = raw.with_columns(pl.col("license").cast(pl.String)).join(
+        latest.with_columns(pl.col("license").cast(pl.String)),
+        on="license",
+        how="left",
+    )
+    if updated.height != raw.height:
+        raise RuntimeError("Boston row count changed while attaching coordinates.")
+    temporary = path.with_suffix(".coord.tmp")
+    updated.write_parquet(temporary)
+    temporary.replace(path)
+    filled = updated.filter(pl.col("latitude").is_not_null())["license"].n_unique()
+    total = raw["license"].n_unique()
+    print(f"{path}: {filled} of {total} restaurants have coordinates", flush=True)
 
 
 def _text(value: object) -> str | None:

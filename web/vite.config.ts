@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/cities": "http://127.0.0.1:8000",
+      "/account": "http://127.0.0.1:8000",
     },
   },
 });

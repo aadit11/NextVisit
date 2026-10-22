@@ -4,11 +4,29 @@ import os
 from functools import lru_cache
 
 import polars as pl
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from nextvisit.api.schemas import RestaurantHit, RestaurantOut
+from nextvisit import accounts
+from nextvisit.api.schemas import (
+    AccountIn,
+    AccountOut,
+    FacetsOut,
+    LoginIn,
+    MapPlaceOut,
+    RestaurantHit,
+    RestaurantOut,
+    ReviewIn,
+    ReviewListOut,
+)
+from nextvisit.osm import place_facts
+from nextvisit.places import facets as place_facets
+from nextvisit.places import map_points as place_map_points
+from nextvisit.places import one as place_one
+from nextvisit.places import peer_comparison
 from nextvisit.cities import CITIES, get_city
+from nextvisit.brief.faithfulness import BriefFacts
+from nextvisit.brief.generate import generate_brief
 from nextvisit.download import load_env
 from nextvisit.model.predict import (
     UnknownRestaurant,
@@ -44,7 +62,7 @@ app = FastAPI(title="Nextvisit")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -62,14 +80,75 @@ def list_cities() -> list[dict[str, object]]:
     ]
 
 
+@app.post("/account/register", response_model=AccountOut)
+def register_account(body: AccountIn) -> AccountOut:
+    try:
+        return AccountOut.model_validate(accounts.register(body.name, body.email, body.password))
+    except ValueError as exc:
+        status = 409 if "already exists" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@app.post("/account/login", response_model=AccountOut)
+def login_account(body: LoginIn) -> AccountOut:
+    try:
+        return AccountOut.model_validate(accounts.login(body.email, body.password))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@app.get("/account/me", response_model=AccountOut)
+def current_account(authorization: str | None = Header(default=None)) -> AccountOut:
+    user = _user(authorization)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Log in to continue.")
+    return AccountOut(token=_bearer(authorization), name=str(user["name"]), email=str(user["email"]))
+
+
+@app.get("/cities/{city_id}/facets", response_model=FacetsOut)
+def city_facets(city_id: str) -> FacetsOut:
+    spec = _spec_or_404(city_id)
+    try:
+        return FacetsOut.model_validate(place_facets(spec.id))
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=501, detail=f"No restaurant list for {spec.name} is on disk.") from exc
+
+
+@app.get("/cities/{city_id}/map", response_model=list[MapPlaceOut])
+def city_map(city_id: str) -> list[MapPlaceOut]:
+    spec = _spec_or_404(city_id)
+    try:
+        points = place_map_points(spec.id)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=501, detail=f"No restaurant list for {spec.name} is on disk.") from exc
+    return [MapPlaceOut.model_validate(point) for point in points]
+
+
 @app.get("/cities/{city_id}/restaurants", response_model=list[RestaurantHit])
-def find_restaurants(city_id: str, q: str = "") -> list[RestaurantHit]:
+def find_restaurants(
+    city_id: str,
+    q: str = "",
+    area: str = "",
+    cuisine: str = "",
+    grade: str = "",
+    clean: bool = False,
+) -> list[RestaurantHit]:
+    spec = _spec_or_404(city_id)
     try:
-        spec = get_city(city_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    try:
-        hits = search_restaurants(spec.id, q)
+        hits = search_restaurants(
+            spec.id,
+            q,
+            area=area,
+            cuisine=cuisine,
+            grade=grade,
+            clean=clean,
+        )
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except OSError as exc:
@@ -80,8 +159,40 @@ def find_restaurants(city_id: str, q: str = "") -> list[RestaurantHit]:
     return [RestaurantHit.model_validate(hit) for hit in hits]
 
 
+@app.get("/cities/{city_id}/restaurants/{restaurant_id}/reviews", response_model=ReviewListOut)
+def list_reviews(
+    city_id: str,
+    restaurant_id: str,
+    authorization: str | None = Header(default=None),
+) -> ReviewListOut:
+    spec = _spec_or_404(city_id)
+    _known_restaurant(spec.id, restaurant_id, spec.name)
+    user = _user(authorization)
+    user_id = int(user["id"]) if user else None
+    return ReviewListOut.model_validate(accounts.reviews_for(spec.id, restaurant_id, user_id))
+
+
+@app.post("/cities/{city_id}/restaurants/{restaurant_id}/reviews", response_model=ReviewListOut)
+def write_review(
+    city_id: str,
+    restaurant_id: str,
+    body: ReviewIn,
+    authorization: str | None = Header(default=None),
+) -> ReviewListOut:
+    spec = _spec_or_404(city_id)
+    user = _user(authorization)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Log in to write a review.")
+    _known_restaurant(spec.id, restaurant_id, spec.name)
+    try:
+        accounts.save_review(spec.id, restaurant_id, int(user["id"]), body.stars, body.comment)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ReviewListOut.model_validate(accounts.reviews_for(spec.id, restaurant_id, int(user["id"])))
+
+
 @app.get("/cities/{city_id}/restaurants/{restaurant_id}", response_model=RestaurantOut)
-def get_restaurant(city_id: str, restaurant_id: str) -> RestaurantOut:
+def get_restaurant(city_id: str, restaurant_id: str, include_work_order: bool = True) -> RestaurantOut:
     try:
         spec = get_city(city_id)
     except KeyError as exc:
@@ -99,16 +210,19 @@ def get_restaurant(city_id: str, restaurant_id: str) -> RestaurantOut:
             status_code=404,
             detail=f"No {spec.name} restaurant {restaurant_id}.",
         ) from exc
-    return RestaurantOut.model_validate(_with_work_order(payload))
+    enriched = _with_work_order(payload, include_work_order=include_work_order)
+    _attach_place(enriched)
+    _attach_brief(enriched)
+    return RestaurantOut.model_validate(enriched)
 
 
-def _with_work_order(payload: dict[str, object]) -> dict[str, object]:
+def _with_work_order(payload: dict[str, object], *, include_work_order: bool = True) -> dict[str, object]:
     payload["work_order_reason"] = None
     city_id = str(payload["city"])
     raw_codes = payload.get("codes")
     codes = [code for code in raw_codes if isinstance(code, str)] if isinstance(raw_codes, list) else []
     codebook = _codebook_or_empty(city_id)
-    if not get_city(city_id).has_work_order:
+    if not get_city(city_id).has_work_order or not include_work_order:
         payload["work_order"] = []
     elif payload["abstained"] or not codes:
         pass
@@ -130,6 +244,121 @@ def _with_work_order(payload: dict[str, object]) -> dict[str, object]:
         for code in codes
     ]
     return payload
+
+
+def _attach_place(payload: dict[str, object]) -> None:
+    city_id = str(payload["city"])
+    restaurant_id = str(payload["restaurant_id"])
+    try:
+        info = place_one(city_id, restaurant_id)
+    except OSError:
+        info = None
+    if info:
+        for key in ("address", "grade", "score", "last_inspection_date", "serious", "latitude", "longitude", "area"):
+            if payload.get(key) in (None, "") and info.get(key) is not None:
+                payload[key] = info[key]
+        if not payload.get("cuisine") and info.get("cuisine"):
+            payload["cuisine"] = info["cuisine"]
+    average, count = accounts.stats_for(city_id, [restaurant_id]).get(restaurant_id, (None, 0))
+    payload["average_stars"] = average
+    payload["review_count"] = count
+    name = payload.get("name") if isinstance(payload.get("name"), str) else None
+    address = payload.get("address") if isinstance(payload.get("address"), str) else None
+    latitude = payload.get("latitude") if isinstance(payload.get("latitude"), (int, float)) else None
+    longitude = payload.get("longitude") if isinstance(payload.get("longitude"), (int, float)) else None
+    facts = place_facts(city_id, restaurant_id, name, address, latitude, longitude)
+    if not payload.get("cuisine") and facts.get("cuisine"):
+        payload["cuisine"] = facts["cuisine"]
+    payload["hours"] = facts.get("hours")
+    if payload.get("latitude") is None and facts.get("latitude") is not None:
+        payload["latitude"] = facts["latitude"]
+        payload["longitude"] = facts["longitude"]
+    area = payload.get("area") if isinstance(payload.get("area"), str) else None
+    cuisine = payload.get("cuisine") if isinstance(payload.get("cuisine"), str) else None
+    grade = payload.get("grade") if isinstance(payload.get("grade"), str) else None
+    try:
+        payload.update(
+            peer_comparison(city_id, restaurant_id, area=area, cuisine=cuisine, grade=grade)
+        )
+    except OSError:
+        payload["peer_count"] = 0
+        payload["peer_graded_count"] = 0
+        payload["peer_standing"] = None
+
+
+def _attach_brief(payload: dict[str, object]) -> None:
+    city_id = str(payload["city"])
+    raw_codes = payload.get("codes")
+    codes: list[tuple[str, str | None]] = []
+    if isinstance(raw_codes, list):
+        for item in raw_codes:
+            if isinstance(item, dict) and isinstance(item.get("code"), str):
+                description = item.get("description")
+                codes.append((item["code"], description if isinstance(description, str) else None))
+    score = payload.get("score")
+    result = generate_brief(
+        city_id,
+        BriefFacts(
+            inspection_date=_text(payload.get("last_inspection_date")),
+            grade=_text(payload.get("grade")),
+            score=float(score) if isinstance(score, (int, float)) and not isinstance(score, bool) else None,
+            trend=_text(payload.get("trend")),
+            recent_visit_count=_count(payload.get("recent_visit_count")),
+            recent_serious_count=_count(payload.get("recent_serious_count")),
+            peer_count=_count(payload.get("peer_count")),
+            peer_graded_count=_count(payload.get("peer_graded_count")),
+            peer_standing=_text(payload.get("peer_standing")),
+            peer_cuisine=_text(payload.get("cuisine")),
+            peer_area=_text(payload.get("area")),
+            codes=tuple(codes),
+            include_codes=city_id != "austin",
+            score_trend=_text(payload.get("score_trend")),
+        ),
+    )
+    payload["brief"] = result.text
+    payload["brief_reason"] = result.reason
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
+def _spec_or_404(city_id: str):
+    try:
+        return get_city(city_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _known_restaurant(city_id: str, restaurant_id: str, city_name: str) -> None:
+    try:
+        found = place_one(city_id, restaurant_id)
+    except OSError as exc:
+        raise HTTPException(status_code=501, detail=f"No restaurant list for {city_name} is on disk.") from exc
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"No {city_name} restaurant {restaurant_id}.")
+
+
+def _bearer(authorization: str | None) -> str:
+    if not authorization:
+        return ""
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    return token.strip()
+
+
+def _user(authorization: str | None) -> dict[str, object] | None:
+    token = _bearer(authorization)
+    if not token:
+        return None
+    return accounts.user_from_token(token)
 
 
 def _item_payload(item: WorkOrderItem) -> dict[str, str]:
