@@ -19,3 +19,4 @@ web/node_modules/
 web/dist/
 .vercel
 build/
+.env.local
