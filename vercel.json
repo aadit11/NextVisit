@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "env": {
+    "VERCEL_SUPPORT_LARGE_FUNCTIONS": "1"
+  },
   "services": {
     "web": {
       "root": "web",
@@ -12,7 +15,7 @@
       "functions": {
         "app.py": {
           "maxDuration": 60,
-          "excludeFiles": "{web/node_modules/**,.vercel/**,tests/**,**/pyarrow/**,**/pyarrow.libs/**}"
+          "excludeFiles": "{web/node_modules/**,.vercel/**,tests/**,**/pyarrow/**,**/pyarrow.libs/**,**/examples.parquet,**/violations.parquet,**/scipy/spatial/**}"
         }
       }
     }

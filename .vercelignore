@@ -17,3 +17,7 @@ web/dist
 !artifacts/**
 !*.parquet
 !*.joblib
+
+data/app/session.key
+data/processed/**/examples.parquet
+data/raw/los_angeles/violations.parquet
