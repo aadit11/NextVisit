@@ -24,9 +24,9 @@ from nextvisit.places import facets as place_facets
 from nextvisit.places import map_points as place_map_points
 from nextvisit.places import one as place_one
 from nextvisit.places import peer_comparison
+from nextvisit.places import search_restaurants
 from nextvisit.cities import CITIES, get_city
-from nextvisit.brief.generate import generate_history
-from nextvisit.brief.history import assemble
+from nextvisit.brief.history import assemble, render_account, render_summary
 from nextvisit.download import load_env
 from nextvisit.model.predict import (
     UnknownRestaurant,
@@ -44,9 +44,6 @@ from nextvisit.prepare.collapse import CODEBOOK_PATH
 from nextvisit.prepare.king_county import CODEBOOK_PATH as KING_COUNTY_CODEBOOK_PATH
 from nextvisit.prepare.los_angeles import CODEBOOK_PATH as LOS_ANGELES_CODEBOOK_PATH
 from nextvisit.prepare.san_francisco import CODEBOOK_PATH as SAN_FRANCISCO_CODEBOOK_PATH
-from nextvisit.workorder.faithfulness import WorkOrderItem
-from nextvisit.workorder.generate import closing_work_order
-from nextvisit.search import search_restaurants
 
 load_env()
 
@@ -74,7 +71,6 @@ def list_cities() -> list[dict[str, object]]:
             "id": spec.id,
             "name": spec.name,
             "label": spec.label,
-            "has_work_order": spec.has_work_order,
         }
         for spec in CITIES.values()
     ]
@@ -202,7 +198,7 @@ def write_review(
 
 
 @app.get("/cities/{city_id}/restaurants/{restaurant_id}", response_model=RestaurantOut)
-def get_restaurant(city_id: str, restaurant_id: str, include_work_order: bool = True) -> RestaurantOut:
+def get_restaurant(city_id: str, restaurant_id: str) -> RestaurantOut:
     try:
         spec = get_city(city_id)
     except KeyError as exc:
@@ -220,35 +216,17 @@ def get_restaurant(city_id: str, restaurant_id: str, include_work_order: bool = 
             status_code=404,
             detail=f"No {spec.name} restaurant {restaurant_id}.",
         ) from exc
-    enriched = _with_work_order(payload, include_work_order=include_work_order)
+    enriched = _attach_codes(payload)
     _attach_place(enriched)
     _attach_history(enriched)
     return RestaurantOut.model_validate(enriched)
 
 
-def _with_work_order(payload: dict[str, object], *, include_work_order: bool = True) -> dict[str, object]:
-    payload["work_order_reason"] = None
+def _attach_codes(payload: dict[str, object]) -> dict[str, object]:
     city_id = str(payload["city"])
     raw_codes = payload.get("codes")
     codes = [code for code in raw_codes if isinstance(code, str)] if isinstance(raw_codes, list) else []
     codebook = _codebook_or_empty(city_id)
-    if not get_city(city_id).has_work_order or not include_work_order:
-        payload["work_order"] = []
-    elif payload["abstained"] or not codes:
-        pass
-    elif not codebook and city_id in _CODEBOOKS:
-        payload["work_order"] = []
-        payload["work_order_reason"] = f"{city_id} codebook is not on disk."
-    else:
-        cuisine = payload["cuisine"]
-        result = closing_work_order(
-            city_id,
-            cuisine=cuisine if isinstance(cuisine, str) else None,
-            predicted_codes=codes,
-            codebook=codebook,
-        )
-        payload["work_order"] = [_item_payload(item) for item in result.items]
-        payload["work_order_reason"] = result.reason
     payload["codes"] = [
         {"code": code, "description": codebook.get(code)}
         for code in codes
@@ -316,15 +294,9 @@ def _attach_history(payload: dict[str, object]) -> None:
         for visit in facts.visits
     ]
     payload["earlier_inspections"] = facts.earlier_count
-    payload["brief"] = ""
-    payload["brief_reason"] = None
-    if len(facts.visits) < 2:
-        payload["history"] = ""
-        payload["history_reason"] = None
-        return
-    result = generate_history(city_id, facts)
-    payload["history"] = result.text
-    payload["history_reason"] = result.reason
+    payload["code_summary"] = render_summary(facts)
+    payload["history"] = render_account(facts) if len(facts.visits) >= 2 else ""
+    payload["history_reason"] = None
 
 
 def _text(value: object) -> str | None:
@@ -361,15 +333,6 @@ def _user(authorization: str | None) -> dict[str, object] | None:
     if not token:
         return None
     return accounts.user_from_token(token)
-
-
-def _item_payload(item: WorkOrderItem) -> dict[str, str]:
-    return {
-        "station": item.station,
-        "violation_code": item.violation_code,
-        "source_span": item.source_span,
-        "step": item.step,
-    }
 
 
 _PREDICTORS = {

@@ -9,5 +9,4 @@ class CitySpec:
     name: str
     label: str
     source_url: str
-    has_work_order: bool
     cuisine_in_source: bool

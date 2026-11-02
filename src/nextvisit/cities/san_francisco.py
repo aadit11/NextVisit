@@ -16,7 +16,6 @@ SPEC = CitySpec(
     name="San Francisco",
     label="Next inspection status is Conditional Pass or Closure",
     source_url="https://data.sfgov.org/resource/tvy3-wexg.json",
-    has_work_order=True,
     cuisine_in_source=False,
 )
 

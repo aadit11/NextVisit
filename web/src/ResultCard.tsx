@@ -108,6 +108,7 @@ export function ResultCard({ restaurant, signedIn, onReviews, onLogin }: ResultC
         <header>
           <h3>Violation codes</h3>
         </header>
+        {restaurant.code_summary ? <p className="code-summary">{restaurant.code_summary}</p> : null}
         {intro && restaurant.codes.length > 0 ? <p className="code-intro">{intro}</p> : null}
         {restaurant.codes.length > 0 ? (
           <div className="code-list">

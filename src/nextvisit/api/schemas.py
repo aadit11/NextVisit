@@ -1,13 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class WorkOrderItemOut(BaseModel):
-    station: str
-    violation_code: str
-    source_span: str
-    step: str
-
-
 class HistoryCode(BaseModel):
     code: str
     description: str | None = None
@@ -77,11 +70,7 @@ class RestaurantOut(BaseModel):
     earlier_inspections: int = 0
     history: str = ""
     history_reason: str | None = None
-    work_order: list[WorkOrderItemOut]
-    work_order_reason: str | None = None
-    brief: str = ""
-    brief_reason: str | None = None
-    reasons: list[str] = []
+    code_summary: str = ""
 
 
 class AccountIn(BaseModel):

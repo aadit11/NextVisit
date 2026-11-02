@@ -86,7 +86,3 @@ def test_seven_cities_are_registered() -> None:
         "austin",
     }
 
-
-def test_only_austin_lacks_a_work_order() -> None:
-    without = {city_id for city_id, spec in CITIES.items() if not spec.has_work_order}
-    assert without == {"austin"}

@@ -1,15 +1,13 @@
-"""Austin keeps routine scores and does not invent a work order."""
+"""Austin keeps routine scores and does not list violation codes."""
 
 from datetime import date
 
 import polars as pl
-import pytest
 from fastapi.testclient import TestClient
 
 from nextvisit.api.main import app
 from nextvisit.cities.austin import RAW_PATH, normalize_rows
 from nextvisit.prepare.austin import INSPECTIONS_PATH, build_examples, collapse_inspections
-from nextvisit.workorder.generate import build_work_order
 
 client = TestClient(app)
 
@@ -60,11 +58,7 @@ def test_same_day_visit_is_not_a_feature() -> None:
     assert later["label"][0] == 0
 
 
-def test_austin_lookup_returns_a_probability_and_no_work_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(*args: object, **kwargs: object) -> list[object]:
-        raise AssertionError("Austin called the work-order model")
-
-    monkeypatch.setattr("nextvisit.api.main.closing_work_order", boom)
+def test_austin_lookup_returns_a_probability_and_no_codes() -> None:
     facility_id = pl.read_parquet(INSPECTIONS_PATH, columns=["facility_id"])["facility_id"][0]
     response = client.get(f"/cities/austin/restaurants/{facility_id}")
     assert response.status_code == 200
@@ -73,9 +67,7 @@ def test_austin_lookup_returns_a_probability_and_no_work_order(monkeypatch: pyte
     assert body["restaurant_id"] == facility_id
     assert body["label"] == "Next routine inspection scores below 90"
     assert 0.0 <= body["probability"] <= 1.0
-    assert body["work_order"] == []
     assert body["codes"] == []
-    assert build_work_order("austin", cuisine=None, predicted_codes=["score"], codebook={}) == []
 
 
 def test_an_unknown_austin_facility_is_not_found() -> None:
@@ -93,7 +85,7 @@ def test_a_facility_without_a_routine_score_abstains() -> None:
     body = client.get(f"/cities/austin/restaurants/{facility_id}").json()
     assert body["abstained"] is True
     assert body["probability"] is None
-    assert body["work_order"] == []
+    assert body["codes"] == []
 
 
 def _rows() -> pl.DataFrame:

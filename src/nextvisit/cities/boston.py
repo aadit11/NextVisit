@@ -15,7 +15,6 @@ SPEC = CitySpec(
     name="Boston",
     label="Next inspection result is a fail",
     source_url="https://data.boston.gov/api/3/action/datastore_search",
-    has_work_order=True,
     cuisine_in_source=False,
 )
 

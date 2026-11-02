@@ -1,8 +1,7 @@
 """San Francisco scored inspections. Conditional Pass and Closure are positive.
 
 A code enters the codebook only when that inspection row states the official
-wording. A code with no wording stays on the inspection and cannot support a
-work-order span.
+wording. A code with no wording stays on the inspection.
 """
 
 import json

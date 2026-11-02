@@ -4,7 +4,7 @@ Nextvisit helps a diner judge a restaurant's hygiene. The page starts with a cit
 
 The last inspection is a set of rows: grade, score, date, how old it is, the result, whether recent visits are getting cleaner or worse, the area, and hours when they are known. A line under that box gives the city's grade and score range. New York's cuisine comes from the inspection file. The other cities use a nearby OpenStreetMap name match, or the restaurant name when the name itself says the cuisine. Austin's recent-visit row follows the score: falling, rising, or about the same. Its card does not list violation codes.
 
-Codes are explained one by one. They are not grouped into illness, the room, or paperwork. A nearby line counts the same cuisine in the same area and ranks this grade among them. An inspection history lists this restaurant's own visits, newest first, and a short account written from those visits. The account names problems cited on more than one listed visit, problems that appear only on the latest visit, and whether that visit is the best or worst of the list. One visit stays a single visit. The card does not show a hygiene brief or the probability.
+Codes are explained one by one. They are not grouped into illness, the room, or paperwork. A nearby line counts the same cuisine in the same area and ranks this grade among them. An inspection history lists this restaurant's own visits, newest first, and a short account written from those visits. Above the violation codes, a summary counts the latest visit's rules and names which of those codes were cited before, which were added, and which earlier citations did not return. The account names problems cited on more than one listed visit, problems that appear only on the latest visit, and whether that visit is the best or worst of the list. One visit stays a single visit. The card does not show a hygiene brief or the probability.
 
 | City id | A serious problem in that sentence |
 |---|---|
@@ -133,7 +133,6 @@ data/raw/{city}/                         # gitignored extracts
 data/processed/{city}/                   # inspections, examples, codebook
 
 src/nextvisit/
-  domain.py
   cities/                                # one adapter per health department
     base.py
     new_york.py
@@ -155,11 +154,7 @@ src/nextvisit/
   model/baseline.py                      # repeat the previous visit
   model/train.py
   model/evaluate.py
-  brief/generate.py                      # unused diner brief; the page calls generate_history
-  brief/history.py                       # account written from the listed visits
-  brief/faithfulness.py
-  workorder/generate.py                  # not shown on the diner page
-  workorder/faithfulness.py
+  brief/history.py                       # account and code summary written from the listed visits
   api/main.py                            # GET /cities, facets, search, map, and one restaurant
 
 tests/
@@ -191,5 +186,3 @@ uv run uvicorn nextvisit.api.main:app --reload
 ```
 
 From `web/`: `npm install` then `npm run dev`.
-
-Copy `.env.example` to `.env` before a hygiene-brief call. Training does not need that key.

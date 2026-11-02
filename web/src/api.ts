@@ -5,14 +5,6 @@ export type City = {
   id: string;
   name: string;
   label: string;
-  has_work_order: boolean;
-};
-
-export type WorkOrderItem = {
-  station: string;
-  violation_code: string;
-  source_span: string;
-  step: string;
 };
 
 export type HistoryCode = {
@@ -58,11 +50,7 @@ export type Restaurant = {
   earlier_inspections: number;
   history: string;
   history_reason: string | null;
-  work_order: WorkOrderItem[];
-  work_order_reason: string | null;
-  brief: string;
-  brief_reason: string | null;
-  reasons: string[];
+  code_summary?: string;
 };
 
 export type MapPlace = {
@@ -161,7 +149,7 @@ export async function fetchFacets(cityId: string): Promise<Facets> {
 }
 
 export async function fetchRestaurant(cityId: string, restaurantId: string): Promise<Restaurant> {
-  const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}?include_work_order=false`;
+  const path = `/cities/${encodeURIComponent(cityId)}/restaurants/${encodeURIComponent(restaurantId)}`;
   return readJson<Restaurant>(await request(path));
 }
 

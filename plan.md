@@ -109,9 +109,9 @@ Done when each city has its own metrics file, a held-out test split, and one rea
 1. Download the scores file. The restaurant id is `facility_id`. Keep routine inspections.
 2. A serious problem in the decision sentence is a next routine score below 90. The page shows the sentence, not the probability.
 3. The brief uses the last score, how old it is, and whether recent scores are falling. It does not mention violation codes.
-4. Do not call a work-order model. `build_work_order("austin", ...)` stays an empty list, and the diner page does not show it.
+4. The card follows the score and does not list violation codes.
 
-Done when `tests/test_austin_abstains_work_order.py` still passes and an Austin facility id shows the score, its age, the score trend, and a decision sentence with no codes.
+Done when an Austin facility id shows the score, its age, the score trend, and a decision sentence with no codes.
 
 ## 11. Name search
 
