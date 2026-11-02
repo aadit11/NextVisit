@@ -13,7 +13,7 @@ from nextvisit.cities.base import CitySpec
 SPEC = CitySpec(
     id="los_angeles",
     name="Los Angeles County",
-    label="Next inspection includes a serious violation in the county points system",
+    label="Next inspection includes a serious violation",
     source_url="https://www.arcgis.com/sharing/rest/content/items/19b6607ac82c4512b10811870975dbdc/data",
     has_work_order=True,
     cuisine_in_source=False,

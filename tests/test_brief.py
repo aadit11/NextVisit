@@ -124,7 +124,14 @@ def test_a_faithful_reply_is_returned_and_the_call_sees_only_the_record(monkeypa
 
 
 def test_unset_settings_do_not_call_the_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("BRIEF_API_KEY", "BRIEF_BASE_URL", "BRIEF_MODEL"):
+    for name in (
+        "BRIEF_API_KEY",
+        "BRIEF_BASE_URL",
+        "BRIEF_MODEL",
+        "WORKORDER_API_KEY",
+        "WORKORDER_BASE_URL",
+        "WORKORDER_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -133,6 +140,26 @@ def test_unset_settings_do_not_call_the_host(monkeypatch: pytest.MonkeyPatch) ->
     result = generate_brief("new_york", _facts(), client=_client(handler))
     assert result.text == ""
     assert result.reason == "BRIEF_API_KEY, BRIEF_BASE_URL, and BRIEF_MODEL are unset."
+
+
+def test_empty_brief_settings_use_the_work_order_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("BRIEF_API_KEY", "BRIEF_BASE_URL", "BRIEF_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("WORKORDER_API_KEY", "work-key")
+    monkeypatch.setenv("WORKORDER_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("WORKORDER_MODEL", "work-model")
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content.decode())
+        content = {"brief": "Inspected eight months ago. The grade was an A and the score was 7."}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(content)}}]})
+
+    result = generate_brief("new_york", _facts(), client=_client(handler))
+    assert result.text.startswith("Inspected eight months ago.")
+    body = seen["body"]
+    assert isinstance(body, dict)
+    assert body["model"] == "work-model"
 
 
 def test_austin_sends_the_score_and_age_and_no_codes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -200,4 +227,37 @@ def test_austin_drops_a_brief_that_says_scores_are_falling_when_they_are_rising(
     assert result.text == ""
     assert result.reason
     assert "falling" in result.reason
+    assert invented not in result.reason
+
+
+def test_a_brief_that_contradicts_the_next_inspection_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    _settings(monkeypatch)
+    invented = "The next inspection is likely to come back clean. The last score was 74, which is below 90."
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = {"brief": invented}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(content)}}]})
+
+    facts = _facts(
+        grade="C",
+        score=74,
+        trend="worse",
+        recent_visit_count=2,
+        recent_serious_count=1,
+        peer_count=0,
+        peer_cuisine=None,
+        peer_area=None,
+        codes=(),
+        next_inspection="The next inspection is likely to include a serious violation again.",
+        reasons=(
+            "The last inspection was a serious problem.",
+            "1 of 2 inspections on file were serious.",
+            "Recent inspections are getting worse.",
+            "The last score was 74, which is below 90.",
+        ),
+    )
+    result = generate_brief("los_angeles", facts, client=_client(handler))
+    assert result.text == ""
+    assert result.reason
+    assert "clean" in result.reason
     assert invented not in result.reason

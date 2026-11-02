@@ -25,8 +25,8 @@ from nextvisit.places import map_points as place_map_points
 from nextvisit.places import one as place_one
 from nextvisit.places import peer_comparison
 from nextvisit.cities import CITIES, get_city
-from nextvisit.brief.faithfulness import BriefFacts
-from nextvisit.brief.generate import generate_brief
+from nextvisit.brief.generate import generate_history
+from nextvisit.brief.history import assemble
 from nextvisit.download import load_env
 from nextvisit.model.predict import (
     UnknownRestaurant,
@@ -212,7 +212,7 @@ def get_restaurant(city_id: str, restaurant_id: str, include_work_order: bool = 
         ) from exc
     enriched = _with_work_order(payload, include_work_order=include_work_order)
     _attach_place(enriched)
-    _attach_brief(enriched)
+    _attach_history(enriched)
     return RestaurantOut.model_validate(enriched)
 
 
@@ -286,47 +286,39 @@ def _attach_place(payload: dict[str, object]) -> None:
         payload["peer_standing"] = None
 
 
-def _attach_brief(payload: dict[str, object]) -> None:
+def _attach_history(payload: dict[str, object]) -> None:
     city_id = str(payload["city"])
-    raw_codes = payload.get("codes")
-    codes: list[tuple[str, str | None]] = []
-    if isinstance(raw_codes, list):
-        for item in raw_codes:
-            if isinstance(item, dict) and isinstance(item.get("code"), str):
-                description = item.get("description")
-                codes.append((item["code"], description if isinstance(description, str) else None))
-    score = payload.get("score")
-    result = generate_brief(
+    raw_visits = payload.get("visits")
+    visits = [item for item in raw_visits if isinstance(item, dict)] if isinstance(raw_visits, list) else []
+    facts = assemble(
         city_id,
-        BriefFacts(
-            inspection_date=_text(payload.get("last_inspection_date")),
-            grade=_text(payload.get("grade")),
-            score=float(score) if isinstance(score, (int, float)) and not isinstance(score, bool) else None,
-            trend=_text(payload.get("trend")),
-            recent_visit_count=_count(payload.get("recent_visit_count")),
-            recent_serious_count=_count(payload.get("recent_serious_count")),
-            peer_count=_count(payload.get("peer_count")),
-            peer_graded_count=_count(payload.get("peer_graded_count")),
-            peer_standing=_text(payload.get("peer_standing")),
-            peer_cuisine=_text(payload.get("cuisine")),
-            peer_area=_text(payload.get("area")),
-            codes=tuple(codes),
-            include_codes=city_id != "austin",
-            score_trend=_text(payload.get("score_trend")),
-        ),
+        visits,
+        _codebook_or_empty(city_id),
+        score_trend=_text(payload.get("score_trend")),
     )
-    payload["brief"] = result.text
-    payload["brief_reason"] = result.reason
+    payload["visits"] = [
+        {
+            "date": visit.date,
+            "grade": visit.grade,
+            "score": visit.score,
+            "codes": [{"code": code, "description": text} for code, text in visit.codes],
+        }
+        for visit in facts.visits
+    ]
+    payload["earlier_inspections"] = facts.earlier_count
+    payload["brief"] = ""
+    payload["brief_reason"] = None
+    if len(facts.visits) < 2:
+        payload["history"] = ""
+        payload["history_reason"] = None
+        return
+    result = generate_history(city_id, facts)
+    payload["history"] = result.text
+    payload["history_reason"] = result.reason
 
 
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
-
-
-def _count(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return 0
-    return value
 
 
 def _spec_or_404(city_id: str):

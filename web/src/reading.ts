@@ -1,5 +1,3 @@
-import type { Restaurant } from "./api";
-
 export type CodeReading = {
   topic: string;
   plain: string;
@@ -167,37 +165,37 @@ export function readCode(description: string | null): CodeReading {
   if (!description) {
     return {
       topic: "Unlisted code",
-      plain: "This city did not publish a sentence for this code, so only the number is on the record.",
+      plain: "No description is on the record, so only the code is shown.",
     };
   }
   const match = TOPICS.find((topic) => topic.pattern.test(description));
   if (!match) {
     return {
       topic: "Cited rule",
-      plain: "This is a rule the health department cited. The sentence below is the department's own wording.",
+      plain: "This is a cited rule. The wording is below.",
     };
   }
   return { topic: match.topic, plain: match.plain };
 }
 
-export function recordGuide(cityId: string): string {
+export function scaleCaption(cityId: string): string | null {
   switch (cityId) {
     case "new_york":
-      return "The letter is New York's grade for the last inspection. The score is that visit's violation points, so a lower score is cleaner. A critical violation is one the department marks as more likely to cause illness.";
-    case "chicago":
-      return "The result is Chicago's Pass, Pass with conditions, or Fail for the last inspection. Fail is the result this page treats as the problem.";
-    case "king_county":
-      return "The grade is King County's own rating for the last inspection. Red violations are the class the county marks as serious. Blue violations are the other class.";
+      return "A is 0–13. B is 14–27. C is 28 or more. A lower score is cleaner.";
     case "los_angeles":
-      return "The grade and score come from Los Angeles County's points system. A serious violation is a major deduction, scored at 4 points, or a closure violation, scored at 11.";
-    case "boston":
-      return "The result is Boston's pass or fail for the last inspection. A fail is the result this page treats as the problem.";
-    case "san_francisco":
-      return "The status is San Francisco's Pass, Conditional Pass, or Closure. Conditional Pass and Closure are the results this page treats as the problem.";
+      return "A is 90–100. B is 80–89. C is 70–79. A higher score is cleaner.";
     case "austin":
-      return "The number is Austin's routine inspection score. A score under 90 is the result this page treats as the problem. Austin does not publish violation codes.";
+      return "Scores run from 0 to 100. 90 or above is the cleaner result. A higher score is cleaner.";
+    case "king_county":
+      return "Grades run Excellent, Good, Okay, then Needs To Improve. A lower score is cleaner.";
+    case "chicago":
+      return "Results run Pass, Pass with conditions, then Fail.";
+    case "boston":
+      return "Pass is the cleaner result. Fail is the worse result.";
+    case "san_francisco":
+      return "Results run Pass, Conditional Pass, then Closure.";
     default:
-      return "The grade, score, and date describe the last inspection on file.";
+      return null;
   }
 }
 
@@ -210,11 +208,11 @@ export function statusSentence(cityId: string, serious: boolean | null): string 
     ],
     chicago: ["The last inspection result was Fail.", "The last inspection result was not Fail."],
     king_county: [
-      "The last inspection included a red violation, the county's serious class.",
-      "The last inspection had no red violation.",
+      "The last inspection included a serious violation.",
+      "The last inspection had no serious violation.",
     ],
     los_angeles: [
-      "The last inspection included a serious violation in the county points system.",
+      "The last inspection included a serious violation.",
       "The last inspection had no serious violation.",
     ],
     boston: ["The last inspection result was a fail.", "The last inspection result was not a fail."],
@@ -261,6 +259,12 @@ export function inspectionAge(isoDate: string | null, today = new Date()): strin
     return `Inspected ${span(months, "month")} ago.`;
   }
   return `Inspected ${span(Math.max(1, Math.round(days / 365.25)), "year")} ago.`;
+}
+
+export function inspectionDateLabel(isoDate: string | null): string | null {
+  const inspected = parseInspectionDate(isoDate);
+  if (!inspected) return null;
+  return inspected.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
 export function trendSentence(
@@ -319,28 +323,8 @@ function span(count: number, unit: string): string {
   return `${word} ${unit}${count === 1 ? "" : "s"}`;
 }
 
-const LIKELY_SERIOUS: Record<string, string> = {
-  new_york: "The next inspection is likely to include a critical violation again.",
-  chicago: "The next inspection is likely to be a Fail again.",
-  king_county: "The next inspection is likely to include a serious violation again.",
-  los_angeles: "The next inspection is likely to include a serious points violation again.",
-  boston: "The next inspection is likely to be a fail again.",
-  san_francisco: "The next inspection is likely to be a Conditional Pass or a Closure again.",
-  austin: "The next routine score is likely to fall below 90 again.",
-};
-
-export function decisionSentence(restaurant: Restaurant): string | null {
-  if (restaurant.abstained || restaurant.probability == null) return null;
-  if (restaurant.probability >= 0.5) {
-    return LIKELY_SERIOUS[restaurant.city] ?? "The next inspection is likely to find a serious problem again.";
-  }
-  return "The next inspection is likely to come back clean.";
-}
-
-export function codeIntro(cityId: string): string {
-  if (cityId === "austin") {
-    return "Austin publishes a score and does not publish violation codes, so this list stays empty.";
-  }
-  return "Each code is a rule cited on a past inspection. A code is listed once, from the newest inspection that used it. The topic is a short reading of the sentence. The sentence is the health department's wording.";
+export function codeIntro(cityId: string): string | null {
+  if (cityId === "austin") return null;
+  return "Each code is listed once, from the newest inspection that used it. The topic is a short reading of that rule.";
 }
 

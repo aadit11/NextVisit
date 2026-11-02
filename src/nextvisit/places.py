@@ -258,7 +258,7 @@ def _directory(city_id: str) -> pl.DataFrame:
             "name_key",
         ]
     )
-    return _apply_geocodes(listed, city_id)
+    return _apply_cuisines(_apply_geocodes(listed, city_id), city_id)
 
 
 def _apply_geocodes(frame: pl.DataFrame, city_id: str) -> pl.DataFrame:
@@ -280,6 +280,23 @@ def _apply_geocodes(frame: pl.DataFrame, city_id: str) -> pl.DataFrame:
         pl.when(usable).then(pl.col("latitude")).otherwise(pl.col("geo_latitude")).alias("latitude"),
         pl.when(usable).then(pl.col("longitude")).otherwise(pl.col("geo_longitude")).alias("longitude"),
     ).drop(["geo_latitude", "geo_longitude"])
+
+
+def _apply_cuisines(frame: pl.DataFrame, city_id: str) -> pl.DataFrame:
+    """Fill a blank cuisine from the OpenStreetMap name match."""
+    path = Path("data/cuisines") / f"{city_id}.parquet"
+    if not path.exists() or "cuisine" not in frame.columns:
+        return frame
+    extra = (
+        pl.read_parquet(path)
+        .select(["restaurant_id", "cuisine"])
+        .rename({"cuisine": "matched_cuisine"})
+    )
+    joined = frame.join(extra, on="restaurant_id", how="left")
+    blank = pl.col("cuisine").is_null() | (pl.col("cuisine").str.strip_chars() == "")
+    return joined.with_columns(
+        pl.when(blank).then(pl.col("matched_cuisine")).otherwise(pl.col("cuisine")).alias("cuisine")
+    ).drop("matched_cuisine")
 
 
 def _latest_visits(

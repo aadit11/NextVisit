@@ -13,6 +13,13 @@ class HistoryCode(BaseModel):
     description: str | None = None
 
 
+class VisitOut(BaseModel):
+    date: str
+    grade: str | None = None
+    score: float | None = None
+    codes: list[HistoryCode] = []
+
+
 class MapPlaceOut(BaseModel):
     restaurant_id: str
     name: str
@@ -63,10 +70,15 @@ class RestaurantOut(BaseModel):
     peer_standing: str | None = None
     score_trend: str | None = None
     codes: list[HistoryCode]
+    visits: list[VisitOut] = []
+    earlier_inspections: int = 0
+    history: str = ""
+    history_reason: str | None = None
     work_order: list[WorkOrderItemOut]
     work_order_reason: str | None = None
     brief: str = ""
     brief_reason: str | None = None
+    reasons: list[str] = []
 
 
 class AccountIn(BaseModel):

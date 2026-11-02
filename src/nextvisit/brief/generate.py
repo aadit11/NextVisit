@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import httpx
 
 from nextvisit.brief.faithfulness import BriefFacts, brief_errors
+from nextvisit.brief.history import HistoryFacts, render_account
 from nextvisit.cities import get_city
 
 _SETTINGS = ("BRIEF_API_KEY", "BRIEF_BASE_URL", "BRIEF_MODEL")
@@ -70,6 +71,8 @@ def _checked_facts(city_id: str, facts: BriefFacts) -> BriefFacts:
         score_trend=facts.score_trend,
         include_codes=False,
         today=facts.today,
+        next_inspection=facts.next_inspection,
+        reasons=facts.reasons,
     )
 
 
@@ -110,6 +113,10 @@ def _user_payload(city_id: str, facts: BriefFacts) -> dict[str, object]:
         ]
         if codes:
             payload["codes"] = codes
+    if checked.next_inspection:
+        payload["next_inspection"] = checked.next_inspection
+    if checked.reasons:
+        payload["reasons"] = list(checked.reasons)
     return payload
 
 
@@ -126,6 +133,10 @@ def _austin_payload(facts: BriefFacts) -> dict[str, object]:
     if facts.score_trend in {"falling", "rising", "steady"}:
         payload["scores_falling"] = facts.score_trend == "falling"
         payload["score_trend"] = facts.score_trend
+    if facts.next_inspection:
+        payload["next_inspection"] = facts.next_inspection
+    if facts.reasons:
+        payload["reasons"] = list(facts.reasons)
     return payload
 
 
@@ -134,13 +145,15 @@ def _instructions(*, austin: bool) -> str:
         return (
             "Return one JSON object with the key brief. "
             "The brief is two or three sentences for a diner. "
-            "Use only the score, how old the inspection is, and whether recent scores are falling. "
+            "When next_inspection is present, include that conclusion in the first sentence. "
+            "Then use the reasons, the score, how old the inspection is, and whether recent scores are falling. "
             "Say the scores are falling only when scores_falling is true. "
             "Do not mention violation codes or a probability."
         )
     return (
         "Return one JSON object with the key brief. "
-        "The brief is two or three sentences for a diner deciding whether to eat here. "
+        "The brief is two or three sentences about this restaurant. "
+        "When next_inspection is present, include that conclusion in the first sentence, then the reasons. "
         "Use only the facts in the user message. "
         "A date, grade, score, trend, count, or code that is not in those facts must not appear. "
         "Do not name pests, handwashing, temperature, plumbing, restrooms, or garbage "
@@ -152,10 +165,16 @@ def _instructions(*, austin: bool) -> str:
 
 
 def _settings() -> tuple[str, str, str] | None:
-    values = [os.environ.get(name, "").strip() for name in _SETTINGS]
-    if not all(values):
-        return None
-    return values[0], values[1], values[2]
+    brief = [os.environ.get(name, "").strip() for name in _SETTINGS]
+    if all(brief):
+        return brief[0], brief[1], brief[2]
+    work_order = [
+        os.environ.get(name, "").strip()
+        for name in ("WORKORDER_API_KEY", "WORKORDER_BASE_URL", "WORKORDER_MODEL")
+    ]
+    if all(work_order):
+        return work_order[0], work_order[1], work_order[2]
+    return None
 
 
 def _completions_url(base_url: str) -> str:
@@ -170,10 +189,11 @@ def _post(
     url: str,
     api_key: str,
     payload: dict[str, object],
+    timeout: float = 90,
 ) -> object:
     headers = {"Authorization": f"Bearer {api_key}"}
     if client is None:
-        with httpx.Client(timeout=90) as owned:
+        with httpx.Client(timeout=timeout) as owned:
             response = owned.post(url, headers=headers, json=payload)
     else:
         response = client.post(url, headers=headers, json=payload)
@@ -198,3 +218,16 @@ def _parse_brief(body: object) -> str:
     if not isinstance(brief, str) or not brief.strip():
         raise ValueError("Brief response did not include a brief.")
     return brief.strip()
+
+
+def generate_history(
+    city_id: str,
+    facts: HistoryFacts,
+    client: httpx.Client | None = None,
+) -> HygieneBrief:
+    """Return the history account written from the visit groups."""
+    del client
+    get_city(city_id)
+    if len(facts.visits) < 2:
+        return HygieneBrief("", None)
+    return HygieneBrief(render_account(facts))

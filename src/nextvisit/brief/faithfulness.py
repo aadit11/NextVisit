@@ -71,6 +71,8 @@ class BriefFacts:
     problem_kinds: tuple[str, ...] = ()
     score_trend: str | None = None
     today: date | None = None
+    next_inspection: str | None = None
+    reasons: tuple[str, ...] = ()
 
     @property
     def inspection_age(self) -> str | None:
@@ -126,6 +128,7 @@ def brief_errors(brief: str, facts: BriefFacts) -> list[str]:
     errors.extend(_code_errors(text, facts))
     errors.extend(_topic_errors(text, facts))
     errors.extend(_score_trend_errors(text, facts))
+    errors.extend(_outcome_errors(text, facts))
     if re.search(r"\bpercent\b|%", text, re.I):
         errors.append("Brief mentions a probability.")
     return errors
@@ -190,6 +193,10 @@ def _allowed_numbers(facts: BriefFacts) -> set[str]:
             add(part)
     for part in re.findall(r"\d+(?:\.\d+)?", facts.code_text):
         add(part)
+    for source in (facts.next_inspection, *facts.reasons):
+        if source:
+            for part in re.findall(r"\d+(?:\.\d+)?", source):
+                add(part)
     return allowed
 
 
@@ -238,7 +245,9 @@ def _trend_errors(brief: str, facts: BriefFacts) -> list[str]:
     if re.search(r"stayed clean", brief, re.I) and facts.recent_serious_count != 0:
         errors.append("Brief says the recent inspections stayed clean.")
     if re.search(r"serious problem", brief, re.I) and facts.recent_serious_count <= 0:
-        errors.append("Brief mentions a serious problem the recent inspections do not show.")
+        supplied = " ".join(part for part in (facts.next_inspection, *facts.reasons) if part).casefold()
+        if "serious problem" not in supplied:
+            errors.append("Brief mentions a serious problem the recent inspections do not show.")
     return errors
 
 
@@ -268,6 +277,20 @@ def _score_trend_errors(brief: str, facts: BriefFacts) -> list[str]:
         errors.append("Brief says the scores are falling.")
     if re.search(r"\brising\b|\brisen\b", brief, re.I) and facts.score_trend != "rising":
         errors.append("Brief says the scores are rising.")
+    return errors
+
+
+def _outcome_errors(brief: str, facts: BriefFacts) -> list[str]:
+    verdict = (facts.next_inspection or "").casefold()
+    if not verdict:
+        return []
+    errors: list[str] = []
+    clean_claim = re.search(r"come back clean", brief, re.I)
+    serious_claim = re.search(r"serious violation again|serious problem again|below 90 again|\bfail again\b", brief, re.I)
+    if "come back clean" in verdict and serious_claim:
+        errors.append("Brief says the next inspection is likely to find a serious problem.")
+    if "come back clean" not in verdict and clean_claim:
+        errors.append("Brief says the next inspection is likely to come back clean.")
     return errors
 
 

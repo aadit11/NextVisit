@@ -20,6 +20,13 @@ export type HistoryCode = {
   description: string | null;
 };
 
+export type InspectionVisit = {
+  date: string;
+  grade: string | null;
+  score: number | null;
+  codes: HistoryCode[];
+};
+
 export type Restaurant = {
   city: string;
   restaurant_id: string;
@@ -47,10 +54,15 @@ export type Restaurant = {
   peer_standing: "better" | "typical" | "worse" | null;
   score_trend: "falling" | "rising" | "steady" | null;
   codes: HistoryCode[];
+  visits: InspectionVisit[];
+  earlier_inspections: number;
+  history: string;
+  history_reason: string | null;
   work_order: WorkOrderItem[];
   work_order_reason: string | null;
   brief: string;
   brief_reason: string | null;
+  reasons: string[];
 };
 
 export type MapPlace = {

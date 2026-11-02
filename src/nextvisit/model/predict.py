@@ -19,6 +19,8 @@ from nextvisit.cities.los_angeles import SPEC as LOS_ANGELES_SPEC
 from nextvisit.cities.new_york import RAW_PATH, SPEC
 from nextvisit.cities.san_francisco import RAW_PATH as SAN_FRANCISCO_RAW_PATH
 from nextvisit.history import recent_trend, score_direction
+from nextvisit.brief.history import raw_visits
+from nextvisit.model.reasons import decision_reasons
 from nextvisit.cities.san_francisco import SPEC as SAN_FRANCISCO_SPEC
 from nextvisit.model.train import (
     AUSTIN_CATEGORICAL,
@@ -61,6 +63,25 @@ def _score_trend(records: list[dict[str, object]]) -> str | None:
     return score_direction([visit.get("score") for visit in records])
 
 
+def _reasons(
+    city_id: str,
+    row: dict[str, object],
+    records: list[dict[str, object]],
+    *,
+    score_trend: str | None = None,
+) -> list[str]:
+    trend = recent_trend([bool(visit["positive"]) for visit in records])["trend"]
+    return decision_reasons(
+        city_id=city_id,
+        previous_positive=bool(row["previous_positive"]),
+        inspections=int(row["prior_inspection_count"]),
+        serious_count=int(row["prior_positive_count"]),
+        trend=trend if isinstance(trend, str) else None,
+        score=row.get("previous_score"),
+        score_trend=score_trend,
+    )
+
+
 def predict_new_york(camis: str) -> dict[str, object]:
     visits = _inspections().filter(pl.col("camis") == camis).sort("inspection_date")
     if visits.height == 0:
@@ -77,6 +98,7 @@ def predict_new_york(camis: str) -> dict[str, object]:
             "probability": None,
             "label": SPEC.label,
             "codes": [],
+            "visits": [],
             "work_order": [],
             **_trend_fields([]),
         }
@@ -88,7 +110,8 @@ def predict_new_york(camis: str) -> dict[str, object]:
         [visit["inspection_date"] for visit in records],
         as_of,
     )
-    features = pl.DataFrame([_feature_row(records, as_of)])
+    row = _feature_row(records, as_of)
+    features = pl.DataFrame([row])
     bundle = _model()
     probability = float(bundle["model"].predict_proba(bundle["preprocessor"].transform(features))[0, 1])
     return {
@@ -101,7 +124,9 @@ def predict_new_york(camis: str) -> dict[str, object]:
         "probability": probability,
         "label": SPEC.label,
         "codes": _history_codes(records),
+        "visits": raw_visits(records),
         "work_order": [],
+        "reasons": _reasons(SPEC.id, row, records),
         **_trend_fields(records),
     }
 
@@ -123,6 +148,7 @@ def predict_chicago(license_id: str) -> dict[str, object]:
             "probability": None,
             "label": CHICAGO_SPEC.label,
             "codes": [],
+            "visits": [],
             "work_order": [],
             **_trend_fields([]),
         }
@@ -134,7 +160,8 @@ def predict_chicago(license_id: str) -> dict[str, object]:
         [visit["inspection_date"] for visit in records],
         as_of,
     )
-    features = pl.DataFrame([_chicago_feature_row(records, as_of)])
+    row = _chicago_feature_row(records, as_of)
+    features = pl.DataFrame([row])
     bundle = _chicago_model()
     probability = float(bundle["model"].predict_proba(bundle["preprocessor"].transform(features))[0, 1])
     return {
@@ -147,7 +174,9 @@ def predict_chicago(license_id: str) -> dict[str, object]:
         "probability": probability,
         "label": CHICAGO_SPEC.label,
         "codes": _history_codes(records),
+        "visits": raw_visits(records),
         "work_order": [],
+        "reasons": _reasons(CHICAGO_SPEC.id, row, records),
         **_trend_fields(records),
     }
 
@@ -301,6 +330,7 @@ def predict_austin(facility_id: str) -> dict[str, object]:
             "probability": None,
             "label": AUSTIN_SPEC.label,
             "codes": [],
+            "visits": [],
             "work_order": [],
             **_trend_fields([]),
             "score_trend": None,
@@ -313,9 +343,11 @@ def predict_austin(facility_id: str) -> dict[str, object]:
         [visit["inspection_date"] for visit in records],
         as_of,
     )
-    features = pl.DataFrame([_austin_feature_row(records, as_of)])
+    row = _austin_feature_row(records, as_of)
+    features = pl.DataFrame([row])
     bundle = _austin_model()
     probability = float(bundle["model"].predict_proba(bundle["preprocessor"].transform(features))[0, 1])
+    score_trend = _score_trend(records)
     return {
         "city": AUSTIN_SPEC.id,
         "restaurant_id": facility_id,
@@ -326,9 +358,11 @@ def predict_austin(facility_id: str) -> dict[str, object]:
         "probability": probability,
         "label": AUSTIN_SPEC.label,
         "codes": [],
+        "visits": raw_visits(records),
         "work_order": [],
+        "reasons": _reasons(AUSTIN_SPEC.id, row, records, score_trend=score_trend),
         **_trend_fields(records),
-        "score_trend": _score_trend(records),
+        "score_trend": score_trend,
     }
 
 
@@ -508,6 +542,7 @@ def _lookup(
             "probability": None,
             "label": spec.label,
             "codes": [],
+            "visits": [],
             "work_order": [],
             **_trend_fields([]),
         }
@@ -518,7 +553,8 @@ def _lookup(
         [visit["inspection_date"] for visit in records],
         as_of,
     )
-    features = pl.DataFrame([feature_row(records, as_of)])
+    row = feature_row(records, as_of)
+    features = pl.DataFrame([row])
     probability = float(bundle["model"].predict_proba(bundle["preprocessor"].transform(features))[0, 1])
     return {
         "city": spec.id,
@@ -530,7 +566,14 @@ def _lookup(
         "probability": probability,
         "label": spec.label,
         "codes": _history_codes(records),
+        "visits": raw_visits(records),
         "work_order": [],
+        "reasons": _reasons(
+            spec.id,
+            row,
+            records,
+            score_trend=_score_trend(records) if spec.id == "austin" else None,
+        ),
         **_trend_fields(records),
     }
 
