@@ -1,4 +1,6 @@
 .venv
+.vercel
+build
 .git
 .pytest_cache
 .mypy_cache
