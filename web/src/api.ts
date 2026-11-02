@@ -144,7 +144,16 @@ export async function fetchCities(): Promise<City[]> {
 }
 
 export async function fetchMap(cityId: string): Promise<MapPlace[]> {
-  return readJson<MapPlace[]>(await request(`/cities/${encodeURIComponent(cityId)}/map`));
+  const rows = await readJson<Array<{ i: string; n: string; y: number; x: number }>>(
+    await request(`/cities/${encodeURIComponent(cityId)}/map`),
+  );
+  return rows.map((row) => ({
+    restaurant_id: row.i,
+    name: row.n,
+    address: null,
+    latitude: row.y,
+    longitude: row.x,
+  }));
 }
 
 export async function fetchFacets(cityId: string): Promise<Facets> {

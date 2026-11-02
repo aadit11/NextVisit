@@ -127,7 +127,17 @@ def city_map(city_id: str) -> list[MapPlaceOut]:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=501, detail=f"No restaurant list for {spec.name} is on disk.") from exc
-    return [MapPlaceOut.model_validate(point) for point in points]
+    return [
+        MapPlaceOut.model_validate(
+            {
+                "restaurant_id": point["restaurant_id"],
+                "name": point["name"],
+                "latitude": round(float(point["latitude"]), 5),
+                "longitude": round(float(point["longitude"]), 5),
+            }
+        )
+        for point in points
+    ]
 
 
 @app.get("/cities/{city_id}/restaurants", response_model=list[RestaurantHit])

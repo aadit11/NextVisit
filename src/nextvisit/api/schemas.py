@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkOrderItemOut(BaseModel):
@@ -21,11 +21,14 @@ class VisitOut(BaseModel):
 
 
 class MapPlaceOut(BaseModel):
-    restaurant_id: str
-    name: str
-    address: str | None = None
-    latitude: float
-    longitude: float
+    """Short keys keep a whole city's pins under the host's response limit."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    restaurant_id: str = Field(alias="i")
+    name: str = Field(alias="n")
+    latitude: float = Field(alias="y")
+    longitude: float = Field(alias="x")
 
 
 class RestaurantHit(BaseModel):
