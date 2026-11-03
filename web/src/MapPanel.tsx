@@ -42,6 +42,25 @@ const FOCUS_STYLE: L.CircleMarkerOptions = {
   fillOpacity: 0.95,
 };
 
+export type MapRoute = {
+  from: MapPoint;
+  to: MapPoint;
+};
+
+const PATH_STYLE: L.PolylineOptions = {
+  color: "#8d3418",
+  weight: 4,
+  opacity: 0.9,
+};
+
+const ORIGIN_STYLE: L.CircleMarkerOptions = {
+  radius: 8,
+  color: "#8d3418",
+  weight: 2,
+  fillColor: "#f4e2c4",
+  fillOpacity: 0.95,
+};
+
 type MapPanelProps = {
   cityId: string;
   cityName: string;
@@ -51,6 +70,7 @@ type MapPanelProps = {
   focus: MapPoint | null;
   focusName: string | null;
   locating: boolean;
+  route: MapRoute | null;
   onSelect: (id: string) => void;
 };
 
@@ -63,6 +83,7 @@ export function MapPanel({
   focus,
   focusName,
   locating,
+  route,
   onSelect,
 }: MapPanelProps) {
   const node = useRef<HTMLDivElement>(null);
@@ -71,13 +92,16 @@ export function MapPanel({
   const focusLayerRef = useRef<L.LayerGroup | null>(null);
   const placesRef = useRef(places);
   const focusRef = useRef(focus);
+  const routeRef = useRef(route);
   const onSelectRef = useRef(onSelect);
   placesRef.current = places;
   focusRef.current = focus;
+  routeRef.current = route;
   onSelectRef.current = onSelect;
 
   const placesKey = `${cityId}:${places.length}:${places[0]?.id ?? ""}`;
   const focusKey = focus ? `${focus.id}:${focus.latitude.toFixed(5)}:${focus.longitude.toFixed(5)}` : "";
+  const routeKey = route ? `${route.from.id}>${route.to.id}` : "";
 
   useEffect(() => {
     const host = node.current;
@@ -136,8 +160,34 @@ export function MapPanel({
     if (!map || !layer) return;
     layer.clearLayers();
     const selected = focusRef.current;
+    const path = routeRef.current;
     const current = placesRef.current;
-    if (selected) {
+    let roadRequest: AbortController | null = null;
+    if (selected && path && path.to.id === selected.id) {
+      const line = L.polyline(
+        [
+          [path.from.latitude, path.from.longitude],
+          [path.to.latitude, path.to.longitude],
+        ],
+        PATH_STYLE,
+      );
+      line.addTo(layer);
+      const origin = L.circleMarker([path.from.latitude, path.from.longitude], ORIGIN_STYLE);
+      origin.bindPopup(popupNode(path.from), { className: "place-popup", closeButton: false });
+      origin.on("click", () => onSelectRef.current(path.from.id));
+      origin.addTo(layer);
+      const marker = L.circleMarker([selected.latitude, selected.longitude], FOCUS_STYLE);
+      marker.bindPopup(popupNode(selected), { className: "place-popup", closeButton: false });
+      marker.on("click", () => onSelectRef.current(selected.id));
+      marker.addTo(layer);
+      map.fitBounds(line.getBounds(), { padding: [48, 48], maxZoom: 15 });
+      roadRequest = new AbortController();
+      void followRoads(path, roadRequest.signal).then((latLngs) => {
+        if (!latLngs || !mapRef.current || routeRef.current !== path) return;
+        line.setLatLngs(latLngs);
+        map.fitBounds(line.getBounds(), { padding: [48, 48], maxZoom: 15 });
+      });
+    } else if (selected) {
       const marker = L.circleMarker([selected.latitude, selected.longitude], FOCUS_STYLE);
       marker.bindPopup(popupNode(selected), { className: "place-popup", closeButton: false });
       marker.on("click", () => onSelectRef.current(selected.id));
@@ -151,8 +201,11 @@ export function MapPanel({
       map.flyTo([view.latitude, view.longitude], view.zoom, { duration: 0.6 });
     }
     const frame = window.setTimeout(() => map.invalidateSize(), 80);
-    return () => window.clearTimeout(frame);
-  }, [placesKey, focusKey, cityId, placesLoading]);
+    return () => {
+      window.clearTimeout(frame);
+      roadRequest?.abort();
+    };
+  }, [placesKey, focusKey, routeKey, cityId, placesLoading]);
 
   const caption = mapCaption({
     cityName,
@@ -162,6 +215,7 @@ export function MapPanel({
     focus,
     focusName,
     locating,
+    route,
   });
 
   return (
@@ -194,6 +248,7 @@ function mapCaption({
   focus,
   focusName,
   locating,
+  route,
 }: {
   cityName: string;
   places: number;
@@ -202,7 +257,11 @@ function mapCaption({
   focus: MapPoint | null;
   focusName: string | null;
   locating: boolean;
+  route: MapRoute | null;
 }): string {
+  if (route && focus && route.to.id === focus.id) {
+    return `Path from ${route.from.name} to ${focus.name}. ${places.toLocaleString()} places in ${cityName}.`;
+  }
   if (focus) return `${focus.name}, pinned on the map. ${places.toLocaleString()} places in ${cityName}.`;
   if (focusName && locating) return `Finding ${focusName} in ${cityName}.`;
   if (focusName) return `${focusName} has no published map point. ${placeCount(places, cityName)}`;
@@ -217,6 +276,20 @@ function mapCaption({
 function placeCount(places: number, cityName: string): string {
   if (places === 0) return `No places are pinned in ${cityName}.`;
   return places === 1 ? `1 place in ${cityName}.` : `${places.toLocaleString()} places in ${cityName}.`;
+}
+
+async function followRoads(path: MapRoute, signal: AbortSignal): Promise<L.LatLngExpression[] | null> {
+  const url = `https://router.project-osrm.org/route/v1/driving/${path.from.longitude},${path.from.latitude};${path.to.longitude},${path.to.latitude}?overview=full&geometries=geojson`;
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) return null;
+    const body: { routes?: { geometry?: { coordinates?: [number, number][] } }[] } = await response.json();
+    const coordinates = body.routes?.[0]?.geometry?.coordinates;
+    if (!coordinates || coordinates.length < 2) return null;
+    return coordinates.map(([longitude, latitude]) => [latitude, longitude]);
+  } catch {
+    return null;
+  }
 }
 
 function popupNode(point: MapPoint): HTMLElement {

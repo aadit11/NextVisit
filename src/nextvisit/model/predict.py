@@ -40,7 +40,7 @@ from nextvisit.prepare.austin import INSPECTIONS_PATH as AUSTIN_INSPECTIONS_PATH
 from nextvisit.prepare.boston import INSPECTIONS_PATH as BOSTON_INSPECTIONS_PATH
 from nextvisit.prepare.chicago import INSPECTIONS_PATH as CHICAGO_INSPECTIONS_PATH
 from nextvisit.prepare.collapse import INSPECTIONS_PATH
-from nextvisit.prepare.features import assert_features_before_target
+from nextvisit.prepare.features import LeakageError, assert_features_before_target
 from nextvisit.prepare.king_county import INSPECTIONS_PATH as KING_COUNTY_INSPECTIONS_PATH
 from nextvisit.prepare.los_angeles import PROCESSED_INSPECTIONS_PATH as LOS_ANGELES_INSPECTIONS_PATH
 from nextvisit.prepare.san_francisco import INSPECTIONS_PATH as SAN_FRANCISCO_INSPECTIONS_PATH
@@ -634,3 +634,108 @@ def _raw_column_name(path: str, column: str, restaurant_id: str) -> str | None:
     if rows.height == 0:
         return None
     return rows["name"][0]
+
+
+_SCORE_LIMIT = 40
+
+
+def _shared_features(categorical: tuple[str, ...], numeric: tuple[str, ...], extra):
+    def build(visits: list[dict[str, object]], as_of: date) -> dict[str, object]:
+        return _city_feature_row(visits, as_of, categorical, numeric, extra)
+
+    return build
+
+
+_CITY_SCORERS = {
+    "new_york": ("camis", ["inspection_date"], _inspections, _model, _feature_row),
+    "chicago": (
+        "license",
+        ["inspection_date", "inspection_id"],
+        _chicago_inspections,
+        _chicago_model,
+        _chicago_feature_row,
+    ),
+    "austin": (
+        "facility_id",
+        ["inspection_date", "inspection_id"],
+        _austin_inspections,
+        _austin_model,
+        _austin_feature_row,
+    ),
+    "king_county": (
+        "business_id",
+        ["inspection_date", "inspection_id"],
+        _king_county_inspections,
+        lambda: _saved_model("artifacts/king_county/model.joblib"),
+        _shared_features(KING_COUNTY_CATEGORICAL, KING_COUNTY_NUMERIC, _king_county_extra),
+    ),
+    "los_angeles": (
+        "facility_id",
+        ["inspection_date", "inspection_id"],
+        _los_angeles_inspections,
+        lambda: _saved_model("artifacts/los_angeles/model.joblib"),
+        _shared_features(LOS_ANGELES_CATEGORICAL, LOS_ANGELES_NUMERIC, _los_angeles_extra),
+    ),
+    "boston": (
+        "license",
+        ["inspection_date", "inspection_id"],
+        _boston_inspections,
+        lambda: _saved_model("artifacts/boston/model.joblib"),
+        _shared_features(BOSTON_CATEGORICAL, BOSTON_NUMERIC, _boston_extra),
+    ),
+    "san_francisco": (
+        "permit_number",
+        ["inspection_date", "inspection_id"],
+        _san_francisco_inspections,
+        lambda: _saved_model("artifacts/san_francisco/model.joblib"),
+        _shared_features(
+            SAN_FRANCISCO_CATEGORICAL,
+            SAN_FRANCISCO_NUMERIC,
+            _san_francisco_extra,
+        ),
+    ),
+}
+
+
+def serious_probabilities(city_id: str, restaurant_ids: list[str]) -> dict[str, float]:
+    """Score several restaurants with that city's saved model.
+
+    The value is the probability that the next inspection is serious.
+    Each feature date is strictly before the date the score is for.
+    """
+    spec = _CITY_SCORERS.get(city_id)
+    wanted = list(dict.fromkeys(str(item) for item in restaurant_ids if item))[:_SCORE_LIMIT]
+    if spec is None or not wanted:
+        return {}
+    id_column, sort_columns, load, model, features = spec
+    subset = (
+        load()
+        .with_columns(pl.col(id_column).cast(pl.String))
+        .filter(pl.col(id_column).is_in(wanted))
+        .sort(sort_columns)
+    )
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for record in subset.to_dicts():
+        grouped.setdefault(str(record[id_column]), []).append(record)
+    rows: list[dict[str, object]] = []
+    scored: list[str] = []
+    for restaurant_id, records in grouped.items():
+        try:
+            as_of = _as_of(records[-1]["inspection_date"])
+            assert_features_before_target(
+                [visit["inspection_date"] for visit in records],
+                as_of,
+            )
+            rows.append(features(records, as_of))
+        except (LeakageError, KeyError, TypeError, ValueError):
+            continue
+        scored.append(restaurant_id)
+    if not rows:
+        return {}
+    bundle = model()
+    matrix = bundle["preprocessor"].transform(pl.DataFrame(rows))
+    probabilities = bundle["model"].predict_proba(matrix)[:, 1]
+    return {
+        restaurant_id: float(score)
+        for restaurant_id, score in zip(scored, probabilities, strict=True)
+    }

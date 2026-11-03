@@ -23,7 +23,7 @@ from nextvisit.osm import place_facts
 from nextvisit.places import facets as place_facets
 from nextvisit.places import map_points as place_map_points
 from nextvisit.places import one as place_one
-from nextvisit.places import peer_comparison
+from nextvisit.places import nearby_places, peer_comparison
 from nextvisit.places import search_restaurants
 from nextvisit.cities import CITIES, get_city
 from nextvisit.brief.history import assemble, render_account, render_summary
@@ -272,6 +272,24 @@ def _attach_place(payload: dict[str, object]) -> None:
         payload["peer_count"] = 0
         payload["peer_graded_count"] = 0
         payload["peer_standing"] = None
+    own = payload.get("probability") if payload.get("abstained") is False else None
+    origin_lat = payload.get("latitude") if isinstance(payload.get("latitude"), (int, float)) else None
+    origin_lng = payload.get("longitude") if isinstance(payload.get("longitude"), (int, float)) else None
+    try:
+        payload.update(
+            nearby_places(
+                city_id,
+                restaurant_id,
+                area=area,
+                cuisine=cuisine,
+                own_probability=own if isinstance(own, (int, float)) and not isinstance(own, bool) else None,
+                origin_latitude=None if isinstance(origin_lat, bool) else origin_lat,
+                origin_longitude=None if isinstance(origin_lng, bool) else origin_lng,
+            )
+        )
+    except OSError:
+        payload["nearby_basis"] = None
+        payload["cleaner_peers"] = []
 
 
 def _attach_history(payload: dict[str, object]) -> None:

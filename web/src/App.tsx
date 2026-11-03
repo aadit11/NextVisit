@@ -13,13 +13,14 @@ import {
   storeToken,
   type Account,
   type City,
+  type CleanerPeer,
   type Facets,
   type Filters,
   type MapPlace,
   type Restaurant,
   type RestaurantHit,
 } from "./api";
-import { MapPanel, type MapPoint } from "./MapPanel";
+import { MapPanel, type MapPoint, type MapRoute } from "./MapPanel";
 import { ResultCard } from "./ResultCard";
 
 const SAMPLE_CAMIS = "30075445";
@@ -46,6 +47,7 @@ export function App() {
   const [creating, setCreating] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [route, setRoute] = useState<MapRoute | null>(null);
   const [places, setPlaces] = useState<MapPoint[]>([]);
   const [placesLoading, setPlacesLoading] = useState(false);
   const [placesUnavailable, setPlacesUnavailable] = useState(false);
@@ -158,6 +160,7 @@ export function App() {
     setPlacesUnavailable(false);
     setRestaurant(null);
     setFocusId(null);
+    setRoute(null);
     setError(null);
     setMatches([]);
     setHighlight(0);
@@ -166,16 +169,18 @@ export function App() {
     setLoading(false);
   }
 
-  async function lookup(id: string) {
+  async function lookup(id: string, nextRoute: MapRoute | null = null) {
     const restaurantId = id.trim();
     if (!restaurantId) {
       setError("Enter a name or id.");
       setRestaurant(null);
       setFocusId(null);
+      setRoute(null);
       return;
     }
     const token = ++lookupToken.current;
     setFocusId(restaurantId);
+    setRoute(nextRoute);
     setLoading(true);
     setError(null);
     try {
@@ -386,6 +391,7 @@ export function App() {
             focus={focus}
             focusName={focusName}
             locating={loading}
+            route={route}
             onSelect={(id) => void lookup(id)}
           />
           {loading ? <p className="notice">Reading this restaurant's inspection record.</p> : null}
@@ -397,6 +403,7 @@ export function App() {
               signedIn={account !== null}
               onReviews={() => setFilters((current) => ({ ...current }))}
               onLogin={() => setAccountOpen(true)}
+              onOpen={(peer) => void lookup(peer.restaurant_id, routeTo(restaurant, peer))}
             />
           ) : null}
           {!loading && !restaurant && !error && matches.length === 0 ? (
@@ -527,6 +534,33 @@ function FilterSelect({
       </select>
     </label>
   );
+}
+
+function routeTo(restaurant: Restaurant | null, peer: CleanerPeer): MapRoute | null {
+  if (
+    restaurant?.latitude == null
+    || restaurant.longitude == null
+    || peer.latitude == null
+    || peer.longitude == null
+  ) {
+    return null;
+  }
+  return {
+    from: {
+      id: restaurant.restaurant_id,
+      name: restaurant.name ?? restaurant.restaurant_id,
+      address: restaurant.address,
+      latitude: restaurant.latitude,
+      longitude: restaurant.longitude,
+    },
+    to: {
+      id: peer.restaurant_id,
+      name: peer.name,
+      address: peer.address ?? null,
+      latitude: peer.latitude,
+      longitude: peer.longitude,
+    },
+  };
 }
 
 function toMapPoint(place: MapPlace): MapPoint {

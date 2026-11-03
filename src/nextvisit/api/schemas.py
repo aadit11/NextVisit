@@ -39,6 +39,16 @@ class RestaurantHit(BaseModel):
     review_count: int = 0
 
 
+class CleanerPeer(BaseModel):
+    restaurant_id: str
+    name: str
+    grade: str | None = None
+    address: str | None = None
+    distance_miles: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+
 class RestaurantOut(BaseModel):
     city: str
     restaurant_id: str
@@ -64,6 +74,8 @@ class RestaurantOut(BaseModel):
     peer_count: int = 0
     peer_graded_count: int = 0
     peer_standing: str | None = None
+    nearby_basis: str | None = None
+    cleaner_peers: list[CleanerPeer] = []
     score_trend: str | None = None
     codes: list[HistoryCode]
     visits: list[VisitOut] = []

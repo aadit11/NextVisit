@@ -27,6 +27,8 @@ from nextvisit.prepare.san_francisco import INSPECTIONS_PATH as SAN_FRANCISCO_VI
 
 NAME_LIMIT = 8
 FILTER_LIMIT = 24
+CLEANER_SCORE_LIMIT = 30
+CLEANER_LIST_LIMIT = 3
 
 # South, north, west, east. Points outside the city, including 0,0 placeholders, stay off the map.
 _CITY_BOX = {
@@ -164,6 +166,141 @@ def peer_comparison(
         "peer_graded_count": graded_count,
         "peer_standing": peer_standing(own_rank, other_ranks),
     }
+
+
+def nearby_places(
+    city_id: str,
+    restaurant_id: str,
+    *,
+    area: str | None,
+    cuisine: str | None,
+    own_probability: float | None,
+    origin_latitude: float | None = None,
+    origin_longitude: float | None = None,
+) -> dict[str, object]:
+    """List a few real neighbors, with the distance from this restaurant.
+
+    The city's model picks neighbors whose next inspection looks cleaner.
+    When it finds none, the nearest places of the same cuisine that have
+    coordinates fill the list. The count sentence stays either way.
+    """
+    empty: dict[str, object] = {"nearby_basis": None, "cleaner_peers": []}
+    if city_id not in _SOURCES or not area or not cuisine:
+        return empty
+    frame = _with_cached_cuisine(_directory(city_id), city_id)
+    others = frame.filter(
+        pl.col("area").cast(pl.String).str.strip_chars() == area,
+        pl.col("cuisine").is_not_null(),
+        pl.col("cuisine").str.to_lowercase() == cuisine.casefold(),
+        pl.col("restaurant_id") != restaurant_id,
+        pl.col("name").is_not_null(),
+    )
+    origin_lat = _number(origin_latitude)
+    origin_lng = _number(origin_longitude)
+    candidates = [
+        _with_distance(row, origin_lat, origin_lng)
+        for row in others.select(
+            ["restaurant_id", "name", "grade", "address", "latitude", "longitude"]
+        ).to_dicts()
+    ]
+    if not candidates:
+        return empty
+    ranked = sorted(candidates, key=lambda row: _candidate_key(city_id, row))
+    cleaner = _cleaner_than(city_id, ranked[:CLEANER_SCORE_LIMIT], own_probability)
+    if cleaner:
+        cleaner.sort(key=_distance_key)
+        return {"nearby_basis": "cleaner", "cleaner_peers": [_public_peer(row) for row in cleaner[:CLEANER_LIST_LIMIT]]}
+    nearest = [row for row in candidates if row["distance_miles"] is not None]
+    nearest.sort(key=_distance_key)
+    if not nearest:
+        return empty
+    return {"nearby_basis": "closest", "cleaner_peers": [_public_peer(row) for row in nearest[:CLEANER_LIST_LIMIT]]}
+
+
+def _cleaner_than(
+    city_id: str,
+    candidates: list[dict[str, object]],
+    own_probability: float | None,
+) -> list[dict[str, object]]:
+    if not candidates or own_probability is None:
+        return []
+    try:
+        own_score = float(own_probability)
+    except (TypeError, ValueError):
+        return []
+    from nextvisit.model.predict import serious_probabilities
+
+    try:
+        scores = serious_probabilities(
+            city_id,
+            [str(row["restaurant_id"]) for row in candidates],
+        )
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+    cleaner: list[tuple[float, dict[str, object]]] = []
+    for row in candidates:
+        score = scores.get(str(row["restaurant_id"]))
+        if score is None or score >= own_score:
+            continue
+        cleaner.append((score, row))
+    cleaner.sort(key=lambda item: (item[0], str(item[1].get("name") or "")))
+    return [row for _score, row in cleaner]
+
+
+def _with_distance(
+    row: dict[str, object],
+    origin_latitude: float | None,
+    origin_longitude: float | None,
+) -> dict[str, object]:
+    latitude = _number(row.get("latitude"))
+    longitude = _number(row.get("longitude"))
+    measured = dict(row)
+    measured["latitude"] = latitude
+    measured["longitude"] = longitude
+    measured["distance_miles"] = _miles(origin_latitude, origin_longitude, latitude, longitude)
+    return measured
+
+
+def _public_peer(row: dict[str, object]) -> dict[str, object]:
+    miles = row.get("distance_miles")
+    return {
+        "restaurant_id": str(row["restaurant_id"]),
+        "name": str(row["name"]),
+        "grade": _text(row.get("grade")),
+        "address": _text(row.get("address")),
+        "distance_miles": None if not isinstance(miles, float) else round(miles, 2),
+        "latitude": row.get("latitude"),
+        "longitude": row.get("longitude"),
+    }
+
+
+def _distance_key(row: dict[str, object]) -> tuple[int, float, str]:
+    miles = row.get("distance_miles")
+    if not isinstance(miles, float):
+        return (1, 0.0, str(row.get("name") or ""))
+    return (0, miles, str(row.get("name") or ""))
+
+
+def _miles(
+    origin_latitude: float | None,
+    origin_longitude: float | None,
+    latitude: float | None,
+    longitude: float | None,
+) -> float | None:
+    if None in (origin_latitude, origin_longitude, latitude, longitude):
+        return None
+    radius = 3958.7613
+    start_lat = math.radians(origin_latitude)
+    end_lat = math.radians(latitude)
+    lat_delta = math.radians(latitude - origin_latitude)
+    lng_delta = math.radians(longitude - origin_longitude)
+    chord = math.sin(lat_delta / 2) ** 2 + math.cos(start_lat) * math.cos(end_lat) * math.sin(lng_delta / 2) ** 2
+    return 2 * radius * math.asin(math.sqrt(chord))
+
+
+def _candidate_key(city_id: str, row: dict[str, object]) -> tuple[int, str]:
+    rank = grade_rank(city_id, _text(row.get("grade")))
+    return (rank if rank is not None else 99, str(row.get("name") or ""))
 
 
 def apply_filters(

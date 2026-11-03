@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { Restaurant } from "./api";
-import { codeIntro, inspectionAge, inspectionDateLabel, peerSentence, readCode, scaleCaption, scoreTrendSentence, statusSentence, trendSentence } from "./reading";
+import type { CleanerPeer, Restaurant } from "./api";
+import { codeIntro, distanceLabel, inspectionAge, inspectionDateLabel, peerSentence, readCode, scaleCaption, scoreTrendSentence, statusSentence, trendSentence } from "./reading";
 import { Reviews } from "./Reviews";
 
 const CODE_PREVIEW = 6;
@@ -10,9 +10,10 @@ type ResultCardProps = {
   signedIn: boolean;
   onReviews: () => void;
   onLogin: () => void;
+  onOpen?: (peer: CleanerPeer) => void;
 };
 
-export function ResultCard({ restaurant, signedIn, onReviews, onLogin }: ResultCardProps) {
+export function ResultCard({ restaurant, signedIn, onReviews, onLogin, onOpen }: ResultCardProps) {
   const [codesOpen, setCodesOpen] = useState(false);
   const status = statusSentence(restaurant.city, restaurant.serious);
   const age = inspectionAge(restaurant.last_inspection_date);
@@ -27,6 +28,7 @@ export function ResultCard({ restaurant, signedIn, onReviews, onLogin }: ResultC
         ? "trend-cleaner"
         : "trend-steady"
     : `trend-${restaurant.trend}`;
+  const cleaner = restaurant.cleaner_peers ?? [];
   const peers = peerSentence(
     restaurant.cuisine,
     restaurant.area,
@@ -54,7 +56,7 @@ export function ResultCard({ restaurant, signedIn, onReviews, onLogin }: ResultC
       {restaurant.cuisine ? <p className="eyebrow">{restaurant.cuisine}</p> : null}
       <h2>{restaurant.name ?? restaurant.restaurant_id}</h2>
       {restaurant.address ? <p className="street">{restaurant.address}</p> : null}
-      {rows.length > 0 || peers ? (
+      {rows.length > 0 || peers || cleaner.length > 0 ? (
         <section className="reading" aria-label="Inspection record">
           {rows.length > 0 ? (
             <>
@@ -69,10 +71,40 @@ export function ResultCard({ restaurant, signedIn, onReviews, onLogin }: ResultC
               </dl>
             </>
           ) : null}
-          {peers ? (
+          {peers || cleaner.length > 0 ? (
             <>
               <h3>Nearby</h3>
-              <p className={`inspection-peer standing-${restaurant.peer_standing ?? "count"}`}>{peers}</p>
+              {peers ? (
+                <p className={`inspection-peer standing-${restaurant.peer_standing ?? "count"}`}>{peers}</p>
+              ) : null}
+              {cleaner.length > 0 ? (
+                <>
+                <p className="cleaner-lead">
+                  {restaurant.nearby_basis === "closest"
+                    ? "The closest places of the same cuisine."
+                    : "The next inspection looks cleaner at these places."}
+                </p>
+                <ul className="cleaner-peers">
+                  {cleaner.map((peer) => {
+                    const distance = distanceLabel(peer.distance_miles);
+                    return (
+                      <li key={peer.restaurant_id}>
+                        <button type="button" onClick={() => onOpen?.(peer)}>
+                          <span className="peer-name">
+                            <span>{peer.name}</span>
+                            {peer.address ? <small>{peer.address}</small> : null}
+                          </span>
+                          <span className="peer-facts">
+                            {peer.grade ? <strong>{peer.grade}</strong> : null}
+                            {distance ? <em>{distance}</em> : null}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                </>
+              ) : null}
             </>
           ) : null}
         </section>

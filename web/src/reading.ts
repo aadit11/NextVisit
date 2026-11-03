@@ -290,6 +290,13 @@ export function scoreTrendSentence(scoreTrend: string | null | undefined): strin
   return null;
 }
 
+export function distanceLabel(miles: number | null | undefined): string | null {
+  if (miles == null || Number.isNaN(miles) || miles < 0) return null;
+  if (miles < 0.1) return "under 0.1 mi";
+  if (miles < 10) return `${miles.toFixed(1)} mi`;
+  return `${Math.round(miles)} mi`;
+}
+
 export function peerSentence(
   cuisine: string | null | undefined,
   area: string | null | undefined,

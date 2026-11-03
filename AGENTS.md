@@ -1,6 +1,6 @@
 # Nextvisit — agent guide
 
-Nextvisit helps a diner judge a restaurant's hygiene. The last inspection on the page is the health department's record. The card lists the grade, score, date, age, result, recent-visit trend, area, and hours. A line under that box gives the city's grade and score range. Codes are explained one by one. They are not grouped into illness, the room, or paperwork. The nearby line counts the same cuisine in the same area. Read this before changing the repo. `README.md` is the human-facing map. This file is the build contract.
+Nextvisit helps a diner judge a restaurant's hygiene. The last inspection on the page is the health department's record. The card lists the grade, score, date, age, result, recent-visit trend, area, and hours. A line under that box gives the city's grade and score range. Codes are explained one by one. They are not grouped into illness, the room, or paperwork. The nearby line counts the same cuisine in the same area, then lists a few of those restaurants with the distance. Choosing one draws a path on the map. Read this before changing the repo. `README.md` is the human-facing map. This file is the build contract.
 
 ## Invariants
 
@@ -11,7 +11,7 @@ Nextvisit helps a diner judge a restaurant's hygiene. The last inspection on the
 5. Metrics are computed into `artifacts/{city}/metrics.json`. Do not type a number into the README. Do not print those metrics on the diner page.
 6. The inspection history account is written from the listed visits. It names code text cited on more than one listed visit, code text that appears only on the latest visit, and whether that visit is the best or worst of the list. It does not call a model. One visit has no account. A code summary above the violation list is written from the same visits: how many rules the latest visit cited, which of those were cited before, which were added, and which earlier citations did not return. Austin has no code summary. The diner page does not show a hygiene brief or a separate next-inspection section.
 7. Austin's card follows the score (falling, rising, or steady) and does not list violation codes. Austin's history uses the scores and does not mention violation codes.
-8. Do not add a vector database or a chat endpoint. The codebook is a dictionary. The inspection history account and the code summary are written in `brief/history.py` from the listed visits. The peer comparison is a count of the same cuisine in the same area, not a model.
+8. Do not add a vector database or a chat endpoint. The codebook is a dictionary. The inspection history account and the code summary are written in `brief/history.py` from the listed visits. The peer comparison count is the same cuisine in the same area. Under that count, the card lists up to three real restaurants from that group with the name, last grade, and distance. The city's own model chooses them when the next inspection looks cleaner. When it finds none, the list is the nearest places that have coordinates, and the count sentence stays. Choosing one draws a path on the map from the open restaurant to that place.
 9. Do not commit `data/` extracts or `artifacts/` models. Phone numbers are dropped on ingest. Cuisine matches belong in `data/cuisines/`. Geocodes belong in `data/geocodes/`.
 10. Download, prepare, and train are built for the seven city ids. An unknown city id still raises `NotImplementedError`. Do not fake a brief, a trend, a peer line, or a cuisine. New York's cuisine comes from the inspection file. The other cities use `data/cuisines/{city}.parquet` from `scripts/match_cuisines.py`: a nearby OpenStreetMap name match, or the restaurant name when the words say the cuisine.
 
@@ -19,7 +19,7 @@ Nextvisit helps a diner judge a restaurant's hygiene. The last inspection on the
 
 ```
 src/nextvisit/cities/{city}.py          CitySpec only; column mapping belongs here
-src/nextvisit/places.py                 one restaurant row, cuisine join, peer count
+src/nextvisit/places.py                 one restaurant row, cuisine join, peer count, cleaner nearby list
 src/nextvisit/history.py                recent-visit trend and Austin score direction
 src/nextvisit/peers.py                  same cuisine in the same area
 src/nextvisit/cuisines.py               OpenStreetMap and name cuisine match

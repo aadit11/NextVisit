@@ -19,6 +19,16 @@ export type InspectionVisit = {
   codes: HistoryCode[];
 };
 
+export type CleanerPeer = {
+  restaurant_id: string;
+  name: string;
+  grade: string | null;
+  address?: string | null;
+  distance_miles?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
 export type Restaurant = {
   city: string;
   restaurant_id: string;
@@ -44,6 +54,8 @@ export type Restaurant = {
   peer_count: number;
   peer_graded_count: number;
   peer_standing: "better" | "typical" | "worse" | null;
+  nearby_basis?: "cleaner" | "closest" | null;
+  cleaner_peers?: CleanerPeer[];
   score_trend: "falling" | "rising" | "steady" | null;
   codes: HistoryCode[];
   visits: InspectionVisit[];
