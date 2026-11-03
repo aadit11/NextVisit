@@ -6,7 +6,17 @@ from pathlib import Path
 import pytest
 
 from nextvisit.cities import CITIES
-from nextvisit.report import END, START, collect_rows, format_metric, render_results, write_readme
+from nextvisit.report import (
+    ANALYSIS_END,
+    ANALYSIS_START,
+    END,
+    START,
+    collect_rows,
+    format_metric,
+    render_analysis,
+    render_results,
+    write_readme,
+)
 
 
 def test_table_changes_when_metrics_change(tmp_path: Path) -> None:
@@ -44,6 +54,16 @@ def test_city_without_metrics_is_omitted(tmp_path: Path) -> None:
     rows = collect_rows(artifacts, tmp_path / "examples")
     assert [row["city"] for row in rows] == ["austin"]
     assert "King County" not in render_results(rows)
+
+
+def test_readme_analysis_matches_artifact_files() -> None:
+    artifacts = Path("artifacts")
+    if not any((artifacts / city_id / "ablation.json").exists() for city_id in CITIES):
+        pytest.skip("no ablation files on this checkout")
+    readme = Path("README.md").read_text(encoding="utf-8")
+    section = render_analysis(collect_rows(artifacts, Path("data/processed")), artifacts, Path("data/processed"))
+    assert ANALYSIS_START in readme and ANALYSIS_END in readme
+    assert section.strip() in readme
 
 
 def test_missing_baseline_is_rejected(tmp_path: Path) -> None:

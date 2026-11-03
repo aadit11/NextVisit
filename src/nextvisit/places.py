@@ -16,7 +16,7 @@ from nextvisit.cities.los_angeles import INSPECTIONS_PATH as LOS_ANGELES_RAW
 from nextvisit.cities.new_york import RAW_PATH as NEW_YORK_RAW
 from nextvisit.cities.san_francisco import RAW_PATH as SAN_FRANCISCO_RAW
 from nextvisit.osm import cached_cuisines
-from nextvisit.peers import grade_rank, peer_standing
+from nextvisit.peers import grade_rank, peer_standing, record_is_worse
 from nextvisit.prepare.austin import INSPECTIONS_PATH as AUSTIN_VISITS
 from nextvisit.prepare.boston import INSPECTIONS_PATH as BOSTON_VISITS
 from nextvisit.prepare.chicago import INSPECTIONS_PATH as CHICAGO_VISITS
@@ -177,11 +177,15 @@ def nearby_places(
     own_probability: float | None,
     origin_latitude: float | None = None,
     origin_longitude: float | None = None,
+    own_grade: str | None = None,
+    own_score: float | None = None,
+    own_serious: bool | None = None,
 ) -> dict[str, object]:
     """List a few real neighbors, with the distance from this restaurant.
 
-    The city's model picks neighbors whose next inspection looks cleaner.
-    When it finds none, the nearest places of the same cuisine that have
+    A neighbor with a worse last grade or a worse last inspection stays off
+    the list. The city's model picks among the rest when the next inspection
+    looks cleaner. When it finds none, the nearest remaining places that have
     coordinates fill the list. The count sentence stays either way.
     """
     empty: dict[str, object] = {"nearby_basis": None, "cleaner_peers": []}
@@ -197,11 +201,23 @@ def nearby_places(
     )
     origin_lat = _number(origin_latitude)
     origin_lng = _number(origin_longitude)
+    own_grade_text = _text(own_grade)
+    own_score_value = _number(own_score)
+    own_serious_value = _bool(own_serious)
     candidates = [
         _with_distance(row, origin_lat, origin_lng)
         for row in others.select(
-            ["restaurant_id", "name", "grade", "address", "latitude", "longitude"]
+            ["restaurant_id", "name", "grade", "score", "serious", "address", "latitude", "longitude"]
         ).to_dicts()
+        if not record_is_worse(
+            city_id,
+            own_grade_text,
+            own_score_value,
+            own_serious_value,
+            _text(row.get("grade")),
+            _number(row.get("score")),
+            _bool(row.get("serious")),
+        )
     ]
     if not candidates:
         return empty

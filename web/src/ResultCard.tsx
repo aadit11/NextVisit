@@ -81,7 +81,7 @@ export function ResultCard({ restaurant, signedIn, onReviews, onLogin, onOpen }:
                 <>
                 <p className="cleaner-lead">
                   {restaurant.nearby_basis === "closest"
-                    ? "The closest places of the same cuisine."
+                    ? "The closest places with a last inspection at least as good."
                     : "The next inspection looks cleaner at these places."}
                 </p>
                 <ul className="cleaner-peers">

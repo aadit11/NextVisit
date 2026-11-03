@@ -275,6 +275,8 @@ def _attach_place(payload: dict[str, object]) -> None:
     own = payload.get("probability") if payload.get("abstained") is False else None
     origin_lat = payload.get("latitude") if isinstance(payload.get("latitude"), (int, float)) else None
     origin_lng = payload.get("longitude") if isinstance(payload.get("longitude"), (int, float)) else None
+    own_score = payload.get("score")
+    own_serious = payload.get("serious")
     try:
         payload.update(
             nearby_places(
@@ -285,6 +287,9 @@ def _attach_place(payload: dict[str, object]) -> None:
                 own_probability=own if isinstance(own, (int, float)) and not isinstance(own, bool) else None,
                 origin_latitude=None if isinstance(origin_lat, bool) else origin_lat,
                 origin_longitude=None if isinstance(origin_lng, bool) else origin_lng,
+                own_grade=grade,
+                own_score=None if isinstance(own_score, bool) or not isinstance(own_score, (int, float)) else float(own_score),
+                own_serious=own_serious if isinstance(own_serious, bool) else None,
             )
         )
     except OSError:

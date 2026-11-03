@@ -28,6 +28,36 @@ def grade_rank(city_id: str, grade: str | None) -> int | None:
     return _RANKS.get(city_id, {}).get(grade)
 
 
+# New York and King County publish penalty points. Los Angeles and Austin publish a 0–100 score.
+_LOWER_SCORE_IS_CLEANER = frozenset({"new_york", "king_county"})
+_HIGHER_SCORE_IS_CLEANER = frozenset({"los_angeles", "austin"})
+
+
+def record_is_worse(
+    city_id: str,
+    own_grade: str | None,
+    own_score: float | None,
+    own_serious: bool | None,
+    other_grade: str | None,
+    other_score: float | None,
+    other_serious: bool | None,
+) -> bool:
+    """True when the other last grade or last inspection is worse than this restaurant."""
+    own_rank = grade_rank(city_id, own_grade)
+    other_rank = grade_rank(city_id, other_grade)
+    if own_rank is not None and other_rank is not None and other_rank > own_rank:
+        return True
+    if own_serious is False and other_serious is True:
+        return True
+    if own_score is None or other_score is None or own_score == other_score:
+        return False
+    if city_id in _LOWER_SCORE_IS_CLEANER:
+        return other_score > own_score
+    if city_id in _HIGHER_SCORE_IS_CLEANER:
+        return other_score < own_score
+    return False
+
+
 def peer_standing(own_rank: int | None, other_ranks: list[int]) -> str | None:
     """Better than most, typical, or worse than most of the other graded places."""
     if own_rank is None or not other_ranks:

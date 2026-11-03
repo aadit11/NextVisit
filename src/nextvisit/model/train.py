@@ -95,16 +95,32 @@ class FeaturePreprocessor(BaseEstimator, TransformerMixin):
 
     def fit(self, features: pl.DataFrame, y: np.ndarray | None = None) -> "FeaturePreprocessor":
         categorical, numeric = _split(features, self.categorical, self.numeric)
-        encoded = self.encoder.fit_transform(categorical)
-        imputed = self.imputer.fit_transform(numeric)
+        self._skip_categorical = categorical.shape[1] == 0
+        self._skip_numeric = numeric.shape[1] == 0
+        encoded = self._encode(categorical, fit=True)
+        imputed = self._impute(numeric, fit=True)
         self.scaler.fit(np.hstack([encoded, imputed]))
         return self
 
     def transform(self, features: pl.DataFrame) -> np.ndarray:
         categorical, numeric = _split(features, self.categorical, self.numeric)
-        encoded = self.encoder.transform(categorical)
-        imputed = self.imputer.transform(numeric)
+        encoded = self._encode(categorical, fit=False)
+        imputed = self._impute(numeric, fit=False)
         return self.scaler.transform(np.hstack([encoded, imputed]))
+
+    def _encode(self, categorical: np.ndarray, fit: bool) -> np.ndarray:
+        if getattr(self, "_skip_categorical", categorical.shape[1] == 0):
+            return np.zeros((categorical.shape[0], 0))
+        if fit:
+            return self.encoder.fit_transform(categorical)
+        return self.encoder.transform(categorical)
+
+    def _impute(self, numeric: np.ndarray, fit: bool) -> np.ndarray:
+        if getattr(self, "_skip_numeric", numeric.shape[1] == 0):
+            return np.zeros((numeric.shape[0], 0))
+        if fit:
+            return self.imputer.fit_transform(numeric)
+        return self.imputer.transform(numeric)
 
 
 class ChicagoPreprocessor(FeaturePreprocessor):
@@ -147,6 +163,34 @@ class SanFranciscoPreprocessor(FeaturePreprocessor):
 
     categorical = SAN_FRANCISCO_CATEGORICAL
     numeric = SAN_FRANCISCO_NUMERIC
+
+
+EXAMPLES_PATHS = {
+    "new_york": EXAMPLES_PATH,
+    "chicago": CHICAGO_EXAMPLES_PATH,
+    "king_county": KING_COUNTY_EXAMPLES_PATH,
+    "los_angeles": LOS_ANGELES_EXAMPLES_PATH,
+    "boston": BOSTON_EXAMPLES_PATH,
+    "san_francisco": SAN_FRANCISCO_EXAMPLES_PATH,
+    "austin": AUSTIN_EXAMPLES_PATH,
+}
+PREPROCESSORS = {
+    "new_york": FeaturePreprocessor,
+    "chicago": ChicagoPreprocessor,
+    "king_county": KingCountyPreprocessor,
+    "los_angeles": LosAngelesPreprocessor,
+    "boston": BostonPreprocessor,
+    "san_francisco": SanFranciscoPreprocessor,
+    "austin": AustinPreprocessor,
+}
+
+
+def calibrated_lightgbm() -> CalibratedClassifierCV:
+    """The production estimator: calibrated LightGBM with the training settings."""
+    return CalibratedClassifierCV(
+        LGBMClassifier(random_state=0, verbose=-1),
+        cv=3,
+    )
 
 
 def train_city(city_id: str) -> None:
@@ -243,10 +287,7 @@ def _fit(
     logistic = LogisticRegression(max_iter=2000, random_state=0)
     logistic.fit(x_train, y_train)
 
-    calibrated = CalibratedClassifierCV(
-        LGBMClassifier(random_state=0, verbose=-1),
-        cv=3,
-    )
+    calibrated = calibrated_lightgbm()
     calibrated.fit(x_train, y_train)
 
     scores = {
@@ -276,11 +317,16 @@ def _split(
     categorical: tuple[str, ...],
     numeric: tuple[str, ...],
 ) -> tuple[np.ndarray, np.ndarray]:
-    categories = (
-        features.select(list(categorical))
-        .with_columns(pl.all().fill_null("__missing__").cast(pl.String))
-        .to_numpy()
-    )
+    if categorical:
+        categories = (
+            features.select(list(categorical))
+            .with_columns(pl.all().fill_null("__missing__").cast(pl.String))
+            .to_numpy()
+        )
+    else:
+        categories = np.zeros((features.height, 0), dtype=object)
+    if not numeric:
+        return categories, np.zeros((features.height, 0), dtype=float)
     numbers = features.select(list(numeric))
     if "previous_positive" in numeric:
         numbers = numbers.with_columns(pl.col("previous_positive").cast(pl.Float64))

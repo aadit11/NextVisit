@@ -6,9 +6,17 @@ from pathlib import Path
 import polars as pl
 
 from nextvisit.cities import CITIES
+from nextvisit.model.analysis import (
+    other_group_callout,
+    read_json,
+    test_positive_rate,
+    weak_paragraphs,
+)
 
 START = "<!-- results:start -->"
 END = "<!-- results:end -->"
+ANALYSIS_START = "<!-- analysis:start -->"
+ANALYSIS_END = "<!-- analysis:end -->"
 MODEL_ORDER = ("repeat_last_visit", "logistic_regression", "lightgbm")
 MODEL_LABELS = {
     "repeat_last_visit": "Repeat last visit",
@@ -20,6 +28,10 @@ METRIC_KEYS = ("pr_auc", "brier", "top_decile_capture")
 
 def format_metric(value: float) -> str:
     return f"{float(value):.3f}"
+
+
+def format_change(value: float) -> str:
+    return f"{float(value):+.3f}"
 
 
 def collect_rows(artifacts: Path, examples_root: Path) -> list[dict[str, object]]:
@@ -93,23 +105,151 @@ def render_city(row: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def write_readme(readme: Path, artifacts: Path, examples_root: Path) -> str:
-    """Replace the marked results block. Returns the block that was written."""
-    section = render_results(collect_rows(artifacts, examples_root))
-    text = readme.read_text(encoding="utf-8")
-    block = f"{START}\n{section.rstrip()}\n{END}"
-    if START in text and END in text:
-        before, rest = text.split(START, 1)
-        _, after = rest.split(END, 1)
-        updated = before + block + after
+def render_analysis(rows: list[dict[str, object]], artifacts: Path, examples_root: Path) -> str:
+    """Weak-result notes, the ablation tables, and the clean-previous slice."""
+    lines = ["### Where a higher PR-AUC still leaves a weak result", ""]
+    notes: list[str] = []
+    for row in rows:
+        models = row["models"]
+        assert isinstance(models, dict)
+        rate = test_positive_rate(examples_root / str(row["city"]) / "examples.parquet")
+        notes.extend(weak_paragraphs(str(row["name"]), models, rate))
+    if notes:
+        for note in notes:
+            lines.append(note)
+            lines.append("")
     else:
-        needle = "## Folder structure"
-        if needle in text:
-            updated = text.replace(needle, block + "\n\n" + needle, 1)
-        else:
-            updated = text.rstrip() + "\n\n" + block + "\n"
-    readme.write_text(updated, encoding="utf-8")
+        lines.append("No city matches the weak-result rules on the files that are on disk.")
+        lines.append("")
+
+    lines.extend(
+        [
+            "### Features removed one group at a time",
+            "",
+            "Each row refits calibrated LightGBM on the same time split with that group removed. "
+            "Change is that refit minus the full refit. A negative change means removing the group lowered PR-AUC.",
+            "",
+        ]
+    )
+    found_ablation = False
+    for row in rows:
+        payload = read_json(artifacts / str(row["city"]) / "ablation.json")
+        if payload is None:
+            continue
+        found_ablation = True
+        lines.extend(_ablation_city(row, payload))
+    if not found_ablation:
+        lines.append("No ablation files are on disk yet.")
+        lines.append("")
+
+    lines.extend(
+        [
+            "### Previous inspection was clean",
+            "",
+            "The slice keeps test visits whose previous inspection was clean. "
+            "Repeat last visit scores every one of those rows 0, so it has no ranking there. "
+            "LightGBM is the saved city model. A city is listed when the slice has at least 200 rows and 30 serious visits.",
+            "",
+        ]
+    )
+    lines.extend(_slice_section(rows, artifacts))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_readme(readme: Path, artifacts: Path, examples_root: Path) -> str:
+    """Replace the marked results and analysis blocks. Returns the results block."""
+    rows = collect_rows(artifacts, examples_root)
+    section = render_results(rows)
+    analysis = render_analysis(rows, artifacts, examples_root)
+    text = readme.read_text(encoding="utf-8")
+    text = _replace_block(text, START, END, section, "## Folder structure")
+    analysis_block = f"{ANALYSIS_START}\n{analysis.rstrip()}\n{ANALYSIS_END}"
+    if ANALYSIS_START in text and ANALYSIS_END in text:
+        text = _replace_block(text, ANALYSIS_START, ANALYSIS_END, analysis, "## Folder structure")
+    elif END in text:
+        text = text.replace(END, END + "\n\n" + analysis_block, 1)
+    else:
+        text = _replace_block(text, ANALYSIS_START, ANALYSIS_END, analysis, "## Folder structure")
+    readme.write_text(text, encoding="utf-8")
     return section
+
+
+def _replace_block(text: str, start: str, end: str, body: str, insert_before: str) -> str:
+    block = f"{start}\n{body.rstrip()}\n{end}"
+    if start in text and end in text:
+        before, rest = text.split(start, 1)
+        _, after = rest.split(end, 1)
+        return before + block + after
+    if insert_before in text:
+        return text.replace(insert_before, block + "\n\n" + insert_before, 1)
+    return text.rstrip() + "\n\n" + block + "\n"
+
+
+def _ablation_city(row: dict[str, object], payload: dict[str, object]) -> list[str]:
+    full = payload["full"]
+    groups = payload["groups"]
+    assert isinstance(full, dict)
+    assert isinstance(groups, list)
+    lines = [
+        f"#### {row['name']}",
+        "",
+        "| Group removed | Columns | PR-AUC | Change |",
+        "|---|---|---:|---:|",
+        f"| Full refit |  | {format_metric(full['pr_auc'])} |  |",
+    ]
+    for group in groups:
+        columns = ", ".join(group["columns"])
+        lines.append(
+            f"| {group['label']} | {columns} | {format_metric(group['metrics']['pr_auc'])} | "
+            f"{format_change(group['pr_auc_change'])} |"
+        )
+    lines.append("")
+    callout = other_group_callout(str(row["city"]), str(row["name"]), groups)
+    if callout:
+        lines.append(callout)
+        lines.append("")
+    return lines
+
+
+def _slice_section(rows: list[dict[str, object]], artifacts: Path) -> list[str]:
+    found = False
+    eligible: list[tuple[dict[str, object], dict[str, object]]] = []
+    for row in rows:
+        path = artifacts / str(row["city"]) / "slices.json"
+        if not path.exists():
+            continue
+        found = True
+        payload = read_json(path)
+        if payload and payload.get("available") and payload.get("eligible"):
+            eligible.append((row, payload))
+    if not found:
+        return ["No slice files are on disk yet.", ""]
+    if not eligible:
+        return ["No city has 200 clean-previous test rows and 30 serious visits in that slice.", ""]
+    headline_row, headline = max(eligible, key=lambda item: float(item[1]["pr_auc_gap"]))
+    lightgbm = headline["lightgbm"]
+    assert isinstance(lightgbm, dict)
+    lines = [
+        (
+            f"The largest gap between LightGBM PR-AUC and the serious-visit rate is {headline_row['name']}: "
+            f"PR-AUC {format_metric(lightgbm['pr_auc'])} against a serious-visit rate of "
+            f"{format_metric(headline['positive_rate'])} on {headline['rows']} rows "
+            f"({headline['serious_visits']} serious)."
+        ),
+        "",
+        "| City | Rows | Serious visits | Serious-visit rate | LightGBM PR-AUC | Gap | Top-decile capture |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row, payload in eligible:
+        scores = payload["lightgbm"]
+        assert isinstance(scores, dict)
+        lines.append(
+            f"| {row['name']} | {payload['rows']} | {payload['serious_visits']} | "
+            f"{format_metric(payload['positive_rate'])} | {format_metric(scores['pr_auc'])} | "
+            f"{format_change(payload['pr_auc_gap'])} | {format_metric(scores['top_decile_capture'])} |"
+        )
+    lines.append("")
+    return lines
 
 
 def _window_sentence(row: dict[str, object]) -> str:

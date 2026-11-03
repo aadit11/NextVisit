@@ -1,11 +1,22 @@
 """A last grade is better than most, typical, or worse than most of its peers."""
 
-from nextvisit.peers import grade_rank, peer_standing
+from nextvisit.peers import grade_rank, peer_standing, record_is_worse
 from nextvisit.places import nearby_places, one, peer_comparison
 
 
 def test_an_a_is_cleaner_than_a_c() -> None:
     assert grade_rank("new_york", "A") < grade_rank("new_york", "C")
+
+
+def test_a_worse_grade_or_score_or_serious_visit_is_excluded() -> None:
+    assert record_is_worse("new_york", "A", 5, False, "C", 30, True)
+    assert record_is_worse("new_york", "A", 5, False, "A", 13, False)
+    assert record_is_worse("los_angeles", "A", 96, False, "A", 91, False)
+    assert record_is_worse("austin", "90 or above", 95, False, "Below 90", 80, True)
+    assert record_is_worse("chicago", "Pass", None, False, "Pass", None, True)
+    assert not record_is_worse("new_york", "C", 40, True, "A", 2, False)
+    assert not record_is_worse("new_york", "A", 5, False, "A", 5, False)
+    assert not record_is_worse("boston", "Pass", None, False, "Pass", None, False)
 
 
 def test_a_pending_grade_is_not_ranked() -> None:
@@ -64,6 +75,9 @@ def test_cleaner_names_are_real_rows_in_the_same_group(monkeypatch) -> None:
         own_probability=0.5,
         origin_latitude=origin["latitude"],
         origin_longitude=origin["longitude"],
+        own_grade=origin["grade"],
+        own_score=origin["score"],
+        own_serious=origin["serious"],
     )
     chosen = result["cleaner_peers"]
     assert result["nearby_basis"] == "cleaner"
@@ -78,6 +92,15 @@ def test_cleaner_names_are_real_rows_in_the_same_group(monkeypatch) -> None:
         assert row["grade"] == item["grade"]
         assert row["area"] == "Bronx"
         assert row["cuisine"] == "Bakery Products/Desserts"
+        assert not record_is_worse(
+            "new_york",
+            origin["grade"],
+            origin["score"],
+            origin["serious"],
+            row["grade"],
+            row["score"],
+            row["serious"],
+        )
 
 
 def test_a_higher_score_lists_the_nearest_real_places(monkeypatch) -> None:
@@ -95,6 +118,9 @@ def test_a_higher_score_lists_the_nearest_real_places(monkeypatch) -> None:
         own_probability=0.2,
         origin_latitude=origin["latitude"],
         origin_longitude=origin["longitude"],
+        own_grade=origin["grade"],
+        own_score=origin["score"],
+        own_serious=origin["serious"],
     )
     chosen = result["cleaner_peers"]
     assert result["nearby_basis"] == "closest"
@@ -103,6 +129,18 @@ def test_a_higher_score_lists_the_nearest_real_places(monkeypatch) -> None:
     assert distances == sorted(distances)
     assert all(item["restaurant_id"] != "30075445" for item in chosen)
     assert all(item["latitude"] is not None and item["longitude"] is not None for item in chosen)
+    for item in chosen:
+        row = one("new_york", item["restaurant_id"])
+        assert row is not None
+        assert not record_is_worse(
+            "new_york",
+            origin["grade"],
+            origin["score"],
+            origin["serious"],
+            row["grade"],
+            row["score"],
+            row["serious"],
+        )
 
 
 def test_an_unscored_restaurant_without_a_point_keeps_an_empty_list() -> None:
