@@ -22,8 +22,8 @@ export function Reviews({ cityId, restaurantId, signedIn, onChange, onLogin }: R
       .then((loaded) => {
         if (cancelled) return;
         setList(loaded);
-        setStars(loaded.mine?.stars ?? 0);
-        setComment(loaded.mine?.comment ?? "");
+        setStars((current) => loaded.mine?.stars ?? (current > 0 ? current : 0));
+        setComment((current) => loaded.mine?.comment || current);
       })
       .catch((caught: unknown) => {
         if (!cancelled) setError(caught instanceof ApiError ? caught.message : "Reviews could not be loaded.");
